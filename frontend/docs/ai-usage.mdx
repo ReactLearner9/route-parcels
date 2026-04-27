@@ -1,25 +1,72 @@
 # AI Usage
 
-## Project Setup
+## Overview
 
-### Prompts Used
+I used AI to accelerate two main parts of the project:
+- designing the config-driven routing backend
+- implementing and tightening the parcel upload flow with persistence and audit trails
 
-1. Initial scaffold prompt  
-   <details>
-   <summary>Details</summary>
+I reviewed and adjusted the generated code throughout so the final implementation matches the system design goals and the backend constraints.
 
-   #### Modified
+## Routing and Config Design
 
-   - What was modified: Created the first MDX entry from the original project scaffold request and reset the docs area to one root file.
-   - Why it was modified: The docs should start with the initial prompt and stay easy to extend from a single starting point.
+### Prompt Used
 
-   #### Additional Details
+> Build a backend-only parcel routing system with typed config validation, versioned config storage, configurable departments and approvals, and safe rule evaluation.
 
-   - Libraries installed: `express`, `multer`, `pino`, `zod`, `vitest`, `supertest`, `tsx`, `react`, `react-dom`, `react-hook-form`, `@tanstack/react-table`, `sonner`, `idb`, `lucide-react`, `@mdx-js/react`, `@mdx-js/rollup`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `tailwindcss`, `jsdom`, `typescript`, plus the matching `@types/*` packages.
-   - Files and config touched: `package.json`, `backend/package.json`, `frontend/package.json`, `backend/tsconfig.json`, `frontend/tsconfig.json`, `frontend/vite.config.ts`, `frontend/tailwind.config.ts`, `frontend/components.json`, and the first docs file in `frontend/docs/`.
+### Modified
 
-   </details>
+- Added a typed config model with Zod inference for rules, parcels, and routing results.
+- Built validation and persistence around `lowdb` so config changes are versioned.
+- Allowed departments and approvals to be driven by config rather than fixed enums.
+- Kept route selection deterministic by validating conflicts such as duplicate route priorities and duplicate rule logic.
+
+### Why I Changed It
+
+- The generated approach needed to stay safe to evolve.
+- I wanted config changes to be explicit, validated, and auditable.
+- I kept the routing logic simple enough to explain live during the interview.
+
+## Parcel Upload Flow
+
+### Prompt Used
+
+> Add backend routes for single parcel JSON uploads and multipart batch uploads, validate input before routing, persist the processed results, and log each file with a clear ID.
+
+### Modified
+
+- Added `POST /api/upload/single` for JSON body parcel intake.
+- Added `POST /api/upload/batch` for multipart file uploads.
+- Validated both single and batch payloads with Zod before routing.
+- Stored processed parcel data in `lowdb` with file IDs and parcel IDs for traceability.
+- Added audit rows for validation, routing, config updates, and failures.
+- Added request size limits and clearer error handling for invalid payloads.
+
+### Why I Changed It
+
+- The backend needed to show operational traceability, not just return a response.
+- Persisted audit rows make the system easier to debug without adding a full metrics stack.
+- The upload endpoints had to stay operator-friendly while still being safe for public internet exposure.
+
+## Testing and Verification
+
+### Prompt Used
+
+> Add backend tests that cover routing, config validation, and upload route behavior, including failure cases.
+
+### Modified
+
+- Separated routing tests from upload route tests.
+- Added regression coverage for new departments, approvals, and conflict handling.
+- Added negative tests for missing files, invalid JSON, and invalid parcel payloads.
+
+### Why I Changed It
+
+- The tests now map directly to the backend responsibilities.
+- It is easier to extend one area without touching the other.
 
 ## Limitations
 
-<ol></ol>
+- I still reviewed all generated code manually before keeping it.
+- AI was useful for structure and speed, but I treated it as a drafting tool, not a source of truth.
+- I validated the final result by running lint and tests after each meaningful change.

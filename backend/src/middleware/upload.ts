@@ -1,6 +1,8 @@
 import multer from 'multer';
 
-// Central upload middleware placeholder for future file intake routes.
 export const upload = multer({
-  dest: 'uploads'
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 1024 * 1024
+  }
 });

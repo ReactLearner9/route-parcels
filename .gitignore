@@ -10,3 +10,5 @@ frontend/.vite
 frontend/dist
 backend/dist
 frontend/docs/generated
+backend/data/*.json
+!backend/data/.gitkeep
