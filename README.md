@@ -1,6 +1,6 @@
 # Route Parcels
 
-Full-stack TypeScript scaffold for a backend API and a React frontend.
+Full-stack TypeScript app for a backend API and a React frontend.
 
 ## Structure
 

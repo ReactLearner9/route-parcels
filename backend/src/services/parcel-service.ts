@@ -14,8 +14,24 @@ export function validateBatchPayload(payload: unknown): BatchParcelsInput {
   return batchParcelsSchema.parse(payload);
 }
 
+export async function validateSingleParcelPayload(payload: unknown) {
+  return validateSingleParcel(payload);
+}
+
+export async function validateBatchFilePayload(file: MulterFile) {
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(file.buffer.toString('utf8'));
+  } catch {
+    throw new Error('Batch file must contain valid JSON');
+  }
+
+  return validateBatchPayload(payload);
+}
+
 export async function routeSingleParcel(payload: unknown, config: RoutingConfig) {
-  const fileId = makeFileId('single');
+  const fileId = makeFileId();
   const db = await getParcelDb();
   const auditBase = {
     fileId,
@@ -82,7 +98,7 @@ export async function routeBatchFromFile(file: MulterFile, config: RoutingConfig
   }
 
   const parsed = validateBatchPayload(payload);
-  const fileId = makeFileId('batch');
+  const fileId = makeFileId();
   const results = parsed.parcels.map((parcel) => processParcel(parcel, config));
   const db = await getParcelDb();
 

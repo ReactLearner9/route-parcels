@@ -2,7 +2,7 @@
 
 :root {
   color-scheme: dark;
-  --app-bg: #020617;
+  --app-bg: #0b1110;
 }
 
 html {
@@ -13,9 +13,10 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at top, rgba(14, 165, 233, 0.18), transparent 35%),
-    linear-gradient(180deg, #020617 0%, #050816 45%, #020617 100%);
-  color: #e2e8f0;
+    radial-gradient(circle at top, rgba(34, 197, 94, 0.18), transparent 32%),
+    radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.12), transparent 30%),
+    linear-gradient(180deg, #0b1110 0%, #111827 55%, #0b1110 100%);
+  color: #e5e7eb;
   font-family:
     Inter,
     ui-sans-serif,
@@ -24,6 +25,10 @@ body {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 a {
@@ -42,4 +47,15 @@ summary {
   cursor: pointer;
   font-weight: 600;
   color: #f8fafc;
+}
+
+input,
+select,
+textarea {
+  color: #e5e7eb;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #6b7280;
 }

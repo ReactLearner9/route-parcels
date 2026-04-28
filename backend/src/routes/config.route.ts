@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import { upload } from '../middleware/upload.js';
 import { applyUploadedConfig, getConfigState, validateUploadedConfig } from '../services/config-service.js';
+import { getCurrentConfig } from '../config/store.js';
 
 export const configRouter = Router();
 
 configRouter.get('/', async (_request, response, next) => {
   try {
-    response.json(await getConfigState());
+    const [state, current] = await Promise.all([getConfigState(), getCurrentConfig()]);
+    response.json({
+      ...state,
+      currentConfig: current?.config ?? null
+    });
   } catch (error) {
     next(error);
   }

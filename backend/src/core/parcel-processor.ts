@@ -1,6 +1,7 @@
 import type { Parcel, RoutingResult } from './config-types.js';
 import { evaluateCondition } from './condition-engine.js';
 import { validateConfig } from './rule-validator.js';
+import { makeParcelId } from '../config/parcel-store.js';
 
 export function processParcel(parcel: Parcel, config: unknown): RoutingResult {
   const validated = validateConfig(config);
@@ -31,7 +32,7 @@ export function processParcel(parcel: Parcel, config: unknown): RoutingResult {
   }
 
   return {
-    parcelId: parcel.id,
+    parcelId: makeParcelId(),
     route,
     approvals
   };

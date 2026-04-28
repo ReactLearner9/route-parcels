@@ -64,10 +64,65 @@ export async function getParcelDb() {
   return db;
 }
 
-export function makeFileId(prefix: 'single' | 'batch') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+export function makeFileId() {
+  return `${makeFourDigitId()}B`;
 }
 
 export function makeAuditId() {
   return `audit-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+export function makeParcelId() {
+  return `${makeFourDigitId()}S`;
+}
+
+function makeFourDigitId() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+export async function getParcelHistory() {
+  const db = await getParcelDb();
+
+  return {
+    singles: db.data.singles,
+    batches: db.data.batches,
+    audits: db.data.audits
+  };
+}
+
+export async function traceParcel(identifier: string) {
+  const db = await getParcelDb();
+  const lower = identifier.toLowerCase();
+  const singleRecords = db.data.singles;
+  const batchRecords = db.data.batches;
+
+  const single = singleRecords.find(
+    (record) => {
+      const input = record.input as ParcelInput;
+      const result = record.results as RoutingResult;
+
+      return (
+        record.fileId.toLowerCase() === lower ||
+        input.id.toLowerCase() === lower ||
+        result.parcelId.toLowerCase() === lower
+      );
+    }
+  );
+
+  const batch = batchRecords.find((record) =>
+    record.fileId.toLowerCase() === lower ||
+    (Array.isArray(record.input) && record.input.some((parcel) => parcel.id.toLowerCase() === lower)) ||
+    (Array.isArray(record.results) && record.results.some((result) => result.parcelId.toLowerCase() === lower))
+  );
+
+  const audits = db.data.audits.filter((audit) => {
+    return audit.fileId.toLowerCase() === lower || audit.parcelIds?.some((parcelId) => parcelId.toLowerCase() === lower);
+  });
+
+  return {
+    single: single ?? null,
+    batch: batch ?? null,
+    batchId: batch?.fileId ?? '',
+    audits
+  };
 }

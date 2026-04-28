@@ -3,11 +3,11 @@ import { spawn } from 'node:child_process';
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const children = [
-  spawn(npmCmd, ['run', 'dev', '-w', 'backend'], {
+  spawn(npmCmd, ['--prefix', 'backend', 'run', 'dev'], {
     stdio: 'inherit',
     shell: true
   }),
-  spawn(npmCmd, ['run', 'dev', '-w', 'frontend'], {
+  spawn(npmCmd, ['--prefix', 'frontend', 'run', 'dev'], {
     stdio: 'inherit',
     shell: true
   })

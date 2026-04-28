@@ -5,6 +5,7 @@ import { JSONFile } from 'lowdb/node';
 import type { RoutingConfig } from '../core/config-types.js';
 
 export type StoredConfigVersion = {
+  changeId: string;
   version: number;
   createdAt: string;
   checksum: string;
@@ -51,4 +52,8 @@ export async function getConfigDb() {
 export async function getCurrentConfig() {
   const db = await getConfigDb();
   return db.data.versions.find((entry) => entry.version === db.data.currentVersion) ?? null;
+}
+
+export function makeConfigChangeId() {
+  return `${String(Math.floor(1000 + Math.random() * 9000))}C`;
 }

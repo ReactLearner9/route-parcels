@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { RoutingConfig } from '../core/config-types.js';
 import { validateConfig } from '../core/rule-validator.js';
-import { getConfigDb, type StoredConfigVersion, getCurrentConfig } from '../config/store.js';
+import { getConfigDb, type StoredConfigVersion, getCurrentConfig, makeConfigChangeId } from '../config/store.js';
 import { getParcelDb, makeAuditId } from '../config/parcel-store.js';
 
 type MulterFile = Express.Multer.File;
@@ -52,9 +52,11 @@ export async function applyUploadedConfig(file: MulterFile) {
   const db = await getConfigDb();
   const parcelDb = await getParcelDb();
   const checksum = checksumConfig(config);
+  const changeId = makeConfigChangeId();
 
   const version = db.data.currentVersion + 1;
   const record: StoredConfigVersion = {
+    changeId,
     version,
     createdAt: new Date().toISOString(),
     checksum,
@@ -72,7 +74,7 @@ export async function applyUploadedConfig(file: MulterFile) {
     createdAt: new Date().toISOString(),
     step: 'config_applied',
     message: `Config file ${file.originalname} applied as version ${version}`,
-    details: { version, checksum }
+    details: { version, checksum, changeId }
   });
   await parcelDb.write();
 
