@@ -9,8 +9,7 @@ const userRoleSchema = z.enum(['admin', 'operator']);
 
 export const authUserSchema = z.object({
   id: z.string().min(1),
-  name: z.string().min(1),
-  email: z.string().email(),
+  username: z.string().min(1),
   passwordHash: z.string().min(1),
   role: userRoleSchema,
   createdAt: z.string()
@@ -50,16 +49,14 @@ export async function seedUsers() {
   db.data.users.push(
     {
       id: randomUUID(),
-      name: 'Admin User',
-      email: 'admin@routeparcels.local',
+      username: 'admin',
       passwordHash: hashPassword('admin123'),
       role: 'admin',
       createdAt: new Date().toISOString()
     },
     {
       id: randomUUID(),
-      name: 'Operator User',
-      email: 'operator@routeparcels.local',
+      username: 'operator',
       passwordHash: hashPassword('operator123'),
       role: 'operator',
       createdAt: new Date().toISOString()
@@ -69,7 +66,7 @@ export async function seedUsers() {
   await db.write();
 }
 
-export async function findUserByEmail(email: string) {
+export async function findUserByUsername(username: string) {
   const db = await getAuthDb();
-  return db.data.users.find((user) => user.email.toLowerCase() === email.toLowerCase()) ?? null;
+  return db.data.users.find((user) => user.username.toLowerCase() === username.toLowerCase()) ?? null;
 }

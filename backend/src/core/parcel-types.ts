@@ -1,11 +1,9 @@
 import { z } from 'zod';
 
 export const parcelSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1).optional(),
   weight: z.number().nonnegative(),
   value: z.number().nonnegative(),
-  destinationCountry: z.string().min(1).optional(),
-  isFragile: z.boolean().optional()
 }).passthrough();
 
 export const batchParcelsSchema = z.object({

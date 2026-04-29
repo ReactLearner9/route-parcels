@@ -1,34 +1,42 @@
-import { configSchema, type RoutingConfig } from './config-types.js';
-import { operators } from './operators.js';
-import { ruleSignature } from './rule-signature.js';
+import { configSchema, type ApprovalRule, type ConfigRule, type RoutingConfig, type RouteRule } from './config-types.js';
+
+function comparePriority(a: { priority: number }, b: { priority: number }) {
+  return a.priority - b.priority;
+}
 
 export function validateConfig(config: unknown): RoutingConfig {
   const parsed = configSchema.parse(config);
+  const routePriorities = new Set<number>();
 
-  const routePrioritySet = new Set<number>();
-  const signatures = new Set<string>();
+  const routeRules = parsed.rules.filter((rule): rule is RouteRule => rule.type === 'route');
+  const approvalRules = parsed.rules.filter((rule): rule is ApprovalRule => rule.type === 'approval');
 
-  for (const rule of parsed.rules) {
-    if (!operators[rule.when.operator]) {
-      throw new Error(`Invalid operator in ${rule.name}`);
+  for (const rule of routeRules) {
+    if (routePriorities.has(rule.priority)) {
+      throw new Error(`Duplicate routing priority ${rule.priority} is not allowed`);
     }
-
-    if (rule.type === 'route') {
-      if (routePrioritySet.has(rule.priority)) {
-        throw new Error(`Route priority conflict: ${rule.priority} used multiple times`);
-      }
-
-      routePrioritySet.add(rule.priority);
-    }
-
-    const sig = ruleSignature(rule);
-
-    if (signatures.has(sig)) {
-      throw new Error(`Duplicate rule detected: ${rule.name}`);
-    }
-
-    signatures.add(sig);
+    routePriorities.add(rule.priority);
   }
 
-  return parsed;
+  return {
+    rules: [...approvalRules, ...routeRules.sort(comparePriority)] as ConfigRule[],
+  };
+}
+
+export const fallbackRouteRule: RouteRule = {
+  type: 'route',
+  priority: Number.MAX_SAFE_INTEGER,
+  when: { field: 'weight', operator: '>', value: 0 },
+  action: { department: 'MANUAL_REVIEW' }
+};
+
+export function withFallbackRouteRule(config: RoutingConfig | null | undefined): RoutingConfig {
+  const rules = [...(config?.rules ?? []).filter((rule) => !(rule.type === 'route' && rule.priority === fallbackRouteRule.priority && rule.action.department === fallbackRouteRule.action.department))];
+  rules.push(fallbackRouteRule);
+  return {
+    rules: [
+      ...rules.filter((rule) => rule.type === 'approval'),
+      ...rules.filter((rule) => rule.type === 'route').sort(comparePriority)
+    ] as ConfigRule[]
+  };
 }

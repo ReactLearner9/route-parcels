@@ -6,16 +6,17 @@ import type { ParcelInput } from '../core/parcel-types.js';
 import type { RoutingResult } from '../core/config-types.js';
 
 export type StoredParcelRecord = {
-  fileId: string;
+  batchId?: string;
   source: 'single' | 'batch';
   createdAt: string;
+  importedBy: string;
   input: ParcelInput | ParcelInput[];
   results: RoutingResult | RoutingResult[];
 };
 
 export type ParcelAuditEvent = {
   id: string;
-  fileId: string;
+  batchId: string;
   source: 'single' | 'batch' | 'config';
   step:
     | 'validated'
@@ -25,6 +26,7 @@ export type ParcelAuditEvent = {
     | 'uploaded'
     | 'config_applied';
   createdAt: string;
+  actor?: string;
   message: string;
   parcelIds?: string[];
   route?: string;
@@ -64,7 +66,7 @@ export async function getParcelDb() {
   return db;
 }
 
-export function makeFileId() {
+export function makeBatchId() {
   return `${makeFourDigitId()}B`;
 }
 
@@ -102,27 +104,27 @@ export async function traceParcel(identifier: string) {
       const result = record.results as RoutingResult;
 
       return (
-        record.fileId.toLowerCase() === lower ||
-        input.id.toLowerCase() === lower ||
+        record.batchId?.toLowerCase() === lower ||
+        input.id?.toLowerCase() === lower ||
         result.parcelId.toLowerCase() === lower
       );
     }
   );
 
   const batch = batchRecords.find((record) =>
-    record.fileId.toLowerCase() === lower ||
-    (Array.isArray(record.input) && record.input.some((parcel) => parcel.id.toLowerCase() === lower)) ||
+      record.batchId?.toLowerCase() === lower ||
+    (Array.isArray(record.input) && record.input.some((parcel) => parcel.id?.toLowerCase() === lower)) ||
     (Array.isArray(record.results) && record.results.some((result) => result.parcelId.toLowerCase() === lower))
   );
 
   const audits = db.data.audits.filter((audit) => {
-    return audit.fileId.toLowerCase() === lower || audit.parcelIds?.some((parcelId) => parcelId.toLowerCase() === lower);
+    return audit.batchId.toLowerCase() === lower || audit.parcelIds?.some((parcelId) => parcelId.toLowerCase() === lower);
   });
 
   return {
     single: single ?? null,
     batch: batch ?? null,
-    batchId: batch?.fileId ?? '',
+    batchId: batch?.batchId ?? '',
     audits
   };
 }

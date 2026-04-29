@@ -1,55 +1,78 @@
 import { Router } from 'express';
 import { upload } from '../middleware/upload.js';
-import { applyUploadedConfig, getConfigState, validateUploadedConfig } from '../services/config-service.js';
-import { getCurrentConfig } from '../config/store.js';
+import {
+  applyUploadedApprovalConfig,
+  applyUploadedRoutingConfig,
+  getConfigState,
+  validateUploadedApprovalConfig,
+  validateUploadedRoutingConfig,
+} from '../services/config-service.js';
 
 export const configRouter = Router();
 
 configRouter.get('/', async (_request, response, next) => {
   try {
-    const [state, current] = await Promise.all([getConfigState(), getCurrentConfig()]);
-    response.json({
-      ...state,
-      currentConfig: current?.config ?? null
-    });
+    response.json(await getConfigState());
   } catch (error) {
     next(error);
   }
 });
 
-configRouter.post('/validate', upload.single('configFile'), async (request, response, next) => {
+configRouter.post('/approval/validate', upload.single('configFile'), async (request, response, next) => {
   try {
     if (!request.file) {
       response.status(400).json({ error: 'configFile is required' });
       return;
     }
 
-    const result = await validateUploadedConfig(request.file);
-
-    response.json({
-      valid: true,
-      checksum: result.checksum,
-      filename: result.filename,
-      rules: result.rules
-    });
+    response.json(await validateUploadedApprovalConfig(request.file));
   } catch (error) {
     next(error);
   }
 });
 
-configRouter.post('/apply', upload.single('configFile'), async (request, response, next) => {
+configRouter.post('/routing/validate', upload.single('configFile'), async (request, response, next) => {
   try {
     if (!request.file) {
       response.status(400).json({ error: 'configFile is required' });
       return;
     }
 
-    const version = await applyUploadedConfig(request.file);
+    response.json(await validateUploadedRoutingConfig(request.file));
+  } catch (error) {
+    next(error);
+  }
+});
+
+configRouter.post('/approval/apply', upload.single('configFile'), async (request, response, next) => {
+  try {
+    if (!request.file) {
+      response.status(400).json({ error: 'configFile is required' });
+      return;
+    }
+
+    const result = await applyUploadedApprovalConfig(request.file, request.body?.modifiedBy);
+    response.json({
+      applied: true,
+      checksum: result.checksum
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+configRouter.post('/routing/apply', upload.single('configFile'), async (request, response, next) => {
+  try {
+    if (!request.file) {
+      response.status(400).json({ error: 'configFile is required' });
+      return;
+    }
+
+    const result = await applyUploadedRoutingConfig(request.file, request.body?.modifiedBy);
 
     response.json({
       applied: true,
-      version: version.version,
-      checksum: version.checksum
+      checksum: result.checksum
     });
   } catch (error) {
     next(error);

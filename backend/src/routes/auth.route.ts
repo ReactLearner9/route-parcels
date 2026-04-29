@@ -1,36 +1,39 @@
-import { randomUUID } from 'node:crypto';
-import { Router } from 'express';
-import { z } from 'zod';
-import { findUserByEmail, getAuthDb, hashPassword, seedUsers } from '../config/auth-store.js';
+import { randomUUID } from "node:crypto";
+import { Router } from "express";
+import { z } from "zod";
+import {
+  findUserByUsername,
+  getAuthDb,
+  hashPassword,
+  seedUsers,
+} from "../config/auth-store.js";
 
 const credentialsSchema = z.object({
-  email: z.string().email(),
+  username: z.string().min(1),
   password: z.string().min(6),
-  name: z.string().min(1).optional(),
-  role: z.enum(['admin', 'operator']).optional()
+  role: z.enum(["admin", "operator"]).optional(),
 });
 
 export const authRouter = Router();
 
 await seedUsers();
 
-authRouter.post('/register', async (request, response, next) => {
+authRouter.post("/register", async (request, response, next) => {
   try {
     const data = credentialsSchema.parse(request.body);
-    const existing = await findUserByEmail(data.email);
+    const existing = await findUserByUsername(data.username);
     if (existing) {
-      response.status(409).json({ error: 'User already exists' });
+      response.status(409).json({ error: "User already exists" });
       return;
     }
 
     const db = await getAuthDb();
     const user = {
       id: randomUUID(),
-      name: data.name ?? data.email.split('@')[0],
-      email: data.email,
+      username: data.username,
       passwordHash: hashPassword(data.password),
-      role: data.role ?? 'operator',
-      createdAt: new Date().toISOString()
+      role: data.role ?? "operator",
+      createdAt: new Date().toISOString(),
     } as const;
 
     db.data.users.push(user);
@@ -38,47 +41,46 @@ authRouter.post('/register', async (request, response, next) => {
 
     response.status(201).json({
       id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role
+      username: user.username,
+      role: user.role,
     });
   } catch (error) {
     next(error);
   }
 });
 
-authRouter.post('/login', async (request, response, next) => {
+authRouter.post("/login", async (request, response, next) => {
   try {
-    const data = credentialsSchema.pick({ email: true, password: true }).parse(request.body);
-    const user = await findUserByEmail(data.email);
+    const data = credentialsSchema
+      .pick({ username: true, password: true })
+      .parse(request.body);
+    const user = await findUserByUsername(data.username);
 
     if (!user || user.passwordHash !== hashPassword(data.password)) {
-      response.status(401).json({ error: 'Invalid credentials' });
+      response.status(401).json({ error: "Invalid credentials" });
       return;
     }
 
     response.json({
       id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role
+      username: user.username,
+      role: user.role,
     });
   } catch (error) {
     next(error);
   }
 });
 
-authRouter.get('/users', async (_request, response, next) => {
+authRouter.get("/users", async (_request, response, next) => {
   try {
     const db = await getAuthDb();
     response.json(
       db.data.users.map((user) => ({
         id: user.id,
-        name: user.name,
-        email: user.email,
+        username: user.username,
         role: user.role,
-        createdAt: user.createdAt
-      }))
+        createdAt: user.createdAt,
+      })),
     );
   } catch (error) {
     next(error);

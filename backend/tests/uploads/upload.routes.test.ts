@@ -5,22 +5,39 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.js';
 import { sampleConfig } from '../sample-config.js';
 
-const dbPath = resolve(process.cwd(), 'data', 'config-db.json');
+const approvalDbPath = resolve(process.cwd(), 'data', 'approval-config-db.json');
+const routingDbPath = resolve(process.cwd(), 'data', 'routing-config-db.json');
 const parcelDbPath = resolve(process.cwd(), 'data', 'parcel-db.json');
 
 beforeEach(async () => {
-  await rm(dbPath, { force: true });
+  await rm(approvalDbPath, { force: true });
+  await rm(routingDbPath, { force: true });
   await rm(parcelDbPath, { force: true });
 });
 
 async function applySampleConfig(app: ReturnType<typeof createApp>) {
-  const configFile = new File([JSON.stringify(sampleConfig)], 'config.json', {
-    type: 'application/json'
-  });
+  const approvalFile = new File(
+    [JSON.stringify({ rules: sampleConfig.rules.filter((rule) => rule.type === 'approval') })],
+    'approval.json',
+    {
+      type: 'application/json'
+    }
+  );
+  const routingFile = new File(
+    [JSON.stringify({ rules: sampleConfig.rules.filter((rule) => rule.type === 'route') })],
+    'routing.json',
+    {
+      type: 'application/json'
+    }
+  );
 
   await request(app)
-    .post('/api/config/apply')
-    .attach('configFile', Buffer.from(await configFile.arrayBuffer()), 'config.json');
+    .post('/api/config/approval/apply')
+    .attach('configFile', Buffer.from(await approvalFile.arrayBuffer()), 'approval.json');
+
+  await request(app)
+    .post('/api/config/routing/apply')
+    .attach('configFile', Buffer.from(await routingFile.arrayBuffer()), 'routing.json');
 }
 
 describe('parcel upload flow', () => {
@@ -39,7 +56,7 @@ describe('parcel upload flow', () => {
       });
 
     expect(response.status).toBe(201);
-    expect(response.body.fileId).toContain('single-');
+    expect(response.body.batchId).toContain('single-');
     expect(response.body.result.route).toBe('REGULAR');
     expect(response.body.result.approvals).toEqual(['INSURANCE', 'FRAGILE_HANDLING']);
 
@@ -63,7 +80,7 @@ describe('parcel upload flow', () => {
       .attach('batchFile', Buffer.from(JSON.stringify(batchPayload)), 'batch.json');
 
     expect(response.status).toBe(201);
-    expect(response.body.fileId).toContain('batch-');
+    expect(response.body.batchId).toContain('batch-');
     expect(response.body.results).toHaveLength(2);
     expect(response.body.results[0].route).toBe('MAIL');
     expect(response.body.results[1].route).toBe('HEAVY');

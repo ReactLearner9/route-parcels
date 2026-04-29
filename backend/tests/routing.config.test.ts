@@ -6,10 +6,12 @@ import { createApp } from '../src/app.js';
 import { processParcel } from '../src/core/parcel-processor.js';
 import { sampleConfig } from './sample-config.js';
 
-const dbPath = resolve(process.cwd(), 'data', 'config-db.json');
+const approvalDbPath = resolve(process.cwd(), 'data', 'approval-config-db.json');
+const routingDbPath = resolve(process.cwd(), 'data', 'routing-config-db.json');
 
 beforeEach(async () => {
-  await rm(dbPath, { force: true });
+  await rm(approvalDbPath, { force: true });
+  await rm(routingDbPath, { force: true });
 });
 
 describe('parcel routing core', () => {
@@ -31,7 +33,6 @@ describe('parcel routing core', () => {
       ...sampleConfig,
       rules: [
         {
-          name: 'express-rule',
           type: 'route',
           priority: 20,
           when: { field: 'destinationCountry', operator: '==', value: 'DE' },
@@ -54,9 +55,7 @@ describe('parcel routing core', () => {
       ...sampleConfig,
       rules: [
         {
-          name: 'customs-review',
           type: 'approval',
-          priority: 60,
           when: { field: 'destinationCountry', operator: '==', value: 'BR' },
           action: { approval: 'CUSTOMS_REVIEW' }
         },
@@ -76,27 +75,40 @@ describe('parcel routing core', () => {
 describe('config upload flow', () => {
   it('validates and applies a config file', async () => {
     const app = createApp();
-    const configFile = new File([JSON.stringify(sampleConfig)], 'config.json', {
+    const approvalFile = new File([JSON.stringify({ rules: sampleConfig.rules.filter((rule) => rule.type === 'approval') })], 'approval.json', {
+      type: 'application/json'
+    });
+    const routingFile = new File([JSON.stringify({ rules: sampleConfig.rules.filter((rule) => rule.type === 'route') })], 'routing.json', {
       type: 'application/json'
     });
 
     const validateResponse = await request(app)
-      .post('/api/config/validate')
-      .attach('configFile', Buffer.from(await configFile.arrayBuffer()), 'config.json');
+      .post('/api/config/approval/validate')
+      .attach('configFile', Buffer.from(await approvalFile.arrayBuffer()), 'approval.json');
 
     expect(validateResponse.status).toBe(200);
     expect(validateResponse.body.valid).toBe(true);
 
+    const routingValidateResponse = await request(app)
+      .post('/api/config/routing/validate')
+      .attach('configFile', Buffer.from(await routingFile.arrayBuffer()), 'routing.json');
+
+    expect(routingValidateResponse.status).toBe(200);
+    expect(routingValidateResponse.body.valid).toBe(true);
+
     const applyResponse = await request(app)
-      .post('/api/config/apply')
-      .attach('configFile', Buffer.from(await configFile.arrayBuffer()), 'config.json');
+      .post('/api/config/routing/apply')
+      .attach('configFile', Buffer.from(await routingFile.arrayBuffer()), 'routing.json');
 
     expect(applyResponse.status).toBe(200);
     expect(applyResponse.body.applied).toBe(true);
+    expect(applyResponse.body.checksum).toBeTypeOf('string');
 
-    const db = JSON.parse(await readFile(dbPath, 'utf8'));
-    expect(applyResponse.body.version).toBe(db.currentVersion);
-    expect(db.currentVersion).toBeGreaterThan(0);
-    expect(db.versions).toHaveLength(db.currentVersion);
+    const approvalDb = JSON.parse(await readFile(approvalDbPath, 'utf8'));
+    const routingDb = JSON.parse(await readFile(routingDbPath, 'utf8'));
+    expect(approvalDb.currentConfig).toBeDefined();
+    expect(routingDb.currentConfig).toBeDefined();
+    expect(approvalDb.currentConfig.rules).toHaveLength(1);
+    expect(routingDb.currentConfig.rules).toHaveLength(3);
   });
 });

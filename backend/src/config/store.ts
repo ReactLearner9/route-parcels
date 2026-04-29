@@ -4,56 +4,47 @@ import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import type { RoutingConfig } from '../core/config-types.js';
 
-export type StoredConfigVersion = {
-  changeId: string;
-  version: number;
-  createdAt: string;
-  checksum: string;
-  config: RoutingConfig;
+export type ConfigStore = {
+  currentConfig: RoutingConfig | null;
 };
 
-export type ConfigDraft = {
-  checksum: string;
-  createdAt: string;
-  filename: string;
-  config: RoutingConfig;
-  valid: boolean;
-};
-
-export type ConfigDatabase = {
-  currentVersion: number;
-  versions: StoredConfigVersion[];
-};
-
-const dbFile = resolve(process.cwd(), 'data', 'config-db.json');
+const approvalConfigDbFile = resolve(process.cwd(), 'data', 'approval-config-db.json');
+const routingConfigDbFile = resolve(process.cwd(), 'data', 'routing-config-db.json');
 
 async function ensureDir(filePath: string) {
   await mkdir(dirname(filePath), { recursive: true });
 }
 
-export async function getConfigDb() {
-  await ensureDir(dbFile);
+async function createConfigDb(filePath: string) {
+  await ensureDir(filePath);
 
-  const adapter = new JSONFile<ConfigDatabase>(dbFile);
-  const db = new Low<ConfigDatabase>(adapter, {
-    currentVersion: 0,
-    versions: []
+  const adapter = new JSONFile<ConfigStore>(filePath);
+  const db = new Low<ConfigStore>(adapter, {
+    currentConfig: null,
   });
 
   await db.read();
   db.data ??= {
-    currentVersion: 0,
-    versions: []
+    currentConfig: null,
   };
 
   return db;
 }
 
-export async function getCurrentConfig() {
-  const db = await getConfigDb();
-  return db.data.versions.find((entry) => entry.version === db.data.currentVersion) ?? null;
+export async function getApprovalConfigDb() {
+  return createConfigDb(approvalConfigDbFile);
 }
 
-export function makeConfigChangeId() {
-  return `${String(Math.floor(1000 + Math.random() * 9000))}C`;
+export async function getRoutingConfigDb() {
+  return createConfigDb(routingConfigDbFile);
+}
+
+export async function getCurrentApprovalConfig() {
+  const db = await getApprovalConfigDb();
+  return db.data.currentConfig;
+}
+
+export async function getCurrentRoutingConfig() {
+  const db = await getRoutingConfigDb();
+  return db.data.currentConfig;
 }
