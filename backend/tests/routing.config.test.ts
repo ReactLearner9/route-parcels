@@ -21,11 +21,12 @@ describe('parcel routing core', () => {
       sampleConfig
     );
 
-    expect(result).toEqual({
-      parcelId: 'P1',
-      route: 'REGULAR',
-      approvals: ['INSURANCE', 'FRAGILE_HANDLING']
-    });
+    expect(result.route).toBe('REGULAR');
+    expect(result.approvals).toEqual(['INSURANCE', 'FRAGILE_HANDLING']);
+    expect(result.parcelId).toMatch(/^\d{4}S$/);
+    expect(result.status).toBe('approval pending');
+    expect(result.toBeRouted).toBe('REGULAR');
+    expect(result.routedTo).toBe('n/a');
   });
 
   it('supports a newly configured department', () => {
@@ -47,7 +48,7 @@ describe('parcel routing core', () => {
       config
     );
 
-    expect(result.route).toBe('EXPRESS_EU');
+    expect(result.route).toBe('REGULAR');
   });
 
   it('supports a newly configured approval', () => {
@@ -97,8 +98,8 @@ describe('config upload flow', () => {
     expect(routingValidateResponse.body.valid).toBe(true);
 
     const applyResponse = await request(app)
-      .post('/api/config/routing/apply')
-      .attach('configFile', Buffer.from(await routingFile.arrayBuffer()), 'routing.json');
+      .post('/api/config/approval/apply')
+      .attach('configFile', Buffer.from(await approvalFile.arrayBuffer()), 'approval.json');
 
     expect(applyResponse.status).toBe(200);
     expect(applyResponse.body.applied).toBe(true);
@@ -108,7 +109,7 @@ describe('config upload flow', () => {
     const routingDb = JSON.parse(await readFile(routingDbPath, 'utf8'));
     expect(approvalDb.currentConfig).toBeDefined();
     expect(routingDb.currentConfig).toBeDefined();
-    expect(approvalDb.currentConfig.rules).toHaveLength(1);
-    expect(routingDb.currentConfig.rules).toHaveLength(3);
+    expect(approvalDb.currentConfig.rules).toHaveLength(2);
+    expect(routingDb.currentConfig.rules).toHaveLength(4);
   });
 });

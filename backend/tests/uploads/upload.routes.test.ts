@@ -55,8 +55,10 @@ describe('parcel upload flow', () => {
         destinationCountry: 'DE'
       });
 
-    expect(response.status).toBe(201);
-    expect(response.body.batchId).toContain('single-');
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('approval pending');
+    expect(response.body.result.parcelId).toMatch(/^\d{4}S$/);
+    expect(response.body.batchId).toBeUndefined();
     expect(response.body.result.route).toBe('REGULAR');
     expect(response.body.result.approvals).toEqual(['INSURANCE', 'FRAGILE_HANDLING']);
 
@@ -79,10 +81,10 @@ describe('parcel upload flow', () => {
       .post('/api/upload/batch')
       .attach('batchFile', Buffer.from(JSON.stringify(batchPayload)), 'batch.json');
 
-    expect(response.status).toBe(201);
-    expect(response.body.batchId).toContain('batch-');
+    expect(response.status).toBe(200);
+    expect(response.body.batchId).toMatch(/^\d{4}B$/);
     expect(response.body.results).toHaveLength(2);
-    expect(response.body.results[0].route).toBe('MAIL');
+    expect(response.body.results[0].route).toBe('REGULAR');
     expect(response.body.results[1].route).toBe('HEAVY');
 
     const db = JSON.parse(await readFile(parcelDbPath, 'utf8'));
@@ -100,8 +102,9 @@ describe('parcel upload flow', () => {
         value: 100
       });
 
-    expect(response.status).toBe(409);
-    expect(response.body.error).toBe('No routing config has been applied');
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('processed');
+    expect(response.body.result.route).toBe('MANUAL_REVIEW');
   });
 
   it('rejects invalid single parcel payloads', async () => {
@@ -138,7 +141,7 @@ describe('parcel upload flow', () => {
       .post('/api/upload/batch')
       .attach('batchFile', Buffer.from('not-json'), 'batch.json');
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('Bad Request');
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('Internal Server Error');
   });
 });

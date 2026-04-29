@@ -69,7 +69,7 @@ async function seedParcelAndBatchData() {
   parcelDb.data.batches = [];
   parcelDb.data.audits = [];
 
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 5; index += 1) {
     const parcel = {
       id: makeParcelId(),
       weight: 1 + (index % 12),
@@ -87,12 +87,11 @@ async function seedParcelAndBatchData() {
     });
   }
 
-  for (let batchIndex = 0; batchIndex < 2; batchIndex += 1) {
+  {
     const batchId = makeBatchId();
-    const parcelCount = 20 + Math.floor(Math.random() * 11);
-    const input = Array.from({ length: parcelCount }, (_, index) => ({
+    const input = Array.from({ length: 10 }, (_, index) => ({
       id: makeParcelId(),
-      weight: 1 + ((index + batchIndex) % 18),
+      weight: 1 + (index % 10),
       value: 60 + index * 15
     }));
     const results = input.map((parcel) => processParcel(parcel, seedConfig));

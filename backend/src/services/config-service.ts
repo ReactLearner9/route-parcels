@@ -196,7 +196,7 @@ async function validateSectionFile(file: MulterFile, section: ConfigSection): Pr
         {
           rowNo: 1,
           field: 'rules',
-          reason: `Approval ${duplicateInFile} is repeated within the uploaded config.`,
+          reason: `Approval ${duplicateInFile} is already present.`,
         },
       ],
       };
