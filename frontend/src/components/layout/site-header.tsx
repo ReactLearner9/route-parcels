@@ -68,12 +68,12 @@ export function SiteHeader({
               >
                 <Button
                   variant="ghost"
-                  className="rounded-full border border-white/10 bg-white/6 px-3 py-2 text-slate-100"
+                  className="rounded-full px-1.5 py-1.5 text-slate-100 hover:bg-transparent"
                   onFocus={() => setMenuOpen(true)}
                   onBlur={() => setMenuOpen(false)}
                   aria-label="Open account menu"
                 >
-                  <UserCircle2 className="h-5 w-5 text-emerald-300" />
+                  <UserCircle2 className="h-7 w-7 text-emerald-300" />
                 </Button>
                 {menuOpen && (
                   <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/95 shadow-2xl shadow-black/35 backdrop-blur-xl">

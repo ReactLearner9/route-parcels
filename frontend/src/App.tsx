@@ -98,6 +98,11 @@ type HistoryResponse = {
   audits: AuditRow[];
 };
 
+type TraceResponse = {
+  single: StoredParcelRecord | null;
+  batch: StoredParcelRecord | null;
+};
+
 type Condition = {
   field: string;
   operator: ">" | "<" | ">=" | "<=" | "==" | "is_true" | "is_false";
@@ -254,7 +259,7 @@ function LandingPage({
         const allResults = [...singleResults, ...batchResults];
         setStats({
           parcelsRouted: allResults.length,
-          filesImported: history.singles.length + history.batches.length,
+          filesImported: history.batches.length,
         });
       } catch {
         setStats({
@@ -277,7 +282,7 @@ function LandingPage({
           A modern platform for routing, review, and traceability.
         </h1>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 sm:text-base">
-          Import parcels, validate rule-driven data, manage routing rules, and trace outcomes from one operator-friendly dashboard.
+          Import parcels, validate rule-driven data, and use built-in analytics from a polished routing dashboard.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Button onClick={profile ? onGoDashboard : onGoLogin}>
@@ -454,8 +459,8 @@ function LoginPage({
   onLogin: (form: LoginForm, mode: AuthMode) => Promise<void>;
 }) {
   const [form, setForm] = useState<LoginForm>({
-    username: "admin",
-    password: "admin123",
+    username: "",
+    password: "",
     role: "admin",
   });
   const [mode, setMode] = useState<AuthMode>("login");
@@ -548,7 +553,6 @@ function Dashboard({
   onPageChange: (page: DashboardPage) => void;
 }) {
   const [history, setHistory] = useState<HistoryResponse>({ singles: [], batches: [], audits: [] });
-  const [historyLoading, setHistoryLoading] = useState(true);
   const [configState, setConfigState] = useState<ConfigResponse | null>(null);
   const [singleText, setSingleText] = useState(defaultSingle);
   const [singleValidated, setSingleValidated] = useState(false);
@@ -566,9 +570,13 @@ function Dashboard({
   const [parcelSearchInput, setParcelSearchInput] = useState("");
   const [batchSearchInput, setBatchSearchInput] = useState("");
   const [selectedParcelId, setSelectedParcelId] = useState("");
+  const [selectedSingleRecord, setSelectedSingleRecord] = useState<StoredParcelRecord | null>(null);
+  const [selectedSingleResult, setSelectedSingleResult] = useState<RoutingResult | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [singleSearchLoading, setSingleSearchLoading] = useState(false);
   const [batchSearchLoading, setBatchSearchLoading] = useState(false);
+  const [seedDataLoading, setSeedDataLoading] = useState(false);
+  const [seedBatchPage, setSeedBatchPage] = useState(1);
   const [configModal, setConfigModal] = useState<ConfigModalState | null>(null);
   const [configModalText, setConfigModalText] = useState("");
   const [modalMessage, setModalMessage] = useState<string | null>(null);
@@ -599,14 +607,7 @@ function Dashboard({
   }, [page, visiblePages]);
 
   const refreshHistory = async () => {
-    setHistoryLoading(true);
-    try {
-      setHistory(await api<HistoryResponse>("/api/history"));
-    } catch {
-      toast.error("Unable to refresh analytics");
-    } finally {
-      setHistoryLoading(false);
-    }
+    setHistory(await api<HistoryResponse>("/api/history"));
   };
 
   const refreshConfig = async () => {
@@ -618,16 +619,12 @@ function Dashboard({
   };
 
   useEffect(() => {
-    void refreshHistory();
     void refreshConfig();
   }, []);
 
   const approvalRules = configState?.approvalConfig?.rules ?? [];
   const routingRules = configState?.routingConfig?.rules ?? [];
-  const selectedSingle = history.singles.find((record) => {
-    const result = record.results as RoutingResult;
-    return result.parcelId.toLowerCase() === selectedParcelId.toLowerCase();
-  });
+  const selectedSingle = selectedSingleResult;
   const selectedBatch = history.batches.find((record) => {
     const batchId = record.batchId ?? "";
     const results = Array.isArray(record.results) ? record.results : [];
@@ -646,6 +643,15 @@ function Dashboard({
   const analyticsBatchSlice = analyticsBatchResults.slice(
     (analyticsBatchPage - 1) * pageSize,
     analyticsBatchPage * pageSize,
+  );
+  const seededBatch = [...history.batches]
+    .reverse()
+    .find((record) => record.importedBy === "system" && Array.isArray(record.results));
+  const seededBatchResults = seededBatch && Array.isArray(seededBatch.results) ? seededBatch.results : [];
+  const seededBatchPageCount = Math.max(1, Math.ceil(seededBatchResults.length / pageSize));
+  const seededBatchSlice = seededBatchResults.slice(
+    (seedBatchPage - 1) * pageSize,
+    seedBatchPage * pageSize,
   );
   const groupedIssues = groupIssues(failedRows);
   const issuePageCount = Math.max(1, Math.ceil(groupedIssues.length / issuePageSize));
@@ -700,7 +706,6 @@ function Dashboard({
       setFailedRows([]);
       setFailedSection(null);
       toast.success("Single parcel routed");
-      await refreshHistory();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Single routing failed");
     }
@@ -759,7 +764,6 @@ function Dashboard({
       setFailedRows([]);
       setFailedSection(null);
       toast.success("Batch routed");
-      await refreshHistory();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Batch routing failed");
     }
@@ -789,17 +793,59 @@ function Dashboard({
     if (batchFileInputRef.current) batchFileInputRef.current.value = "";
   };
 
-  const searchSingle = () => {
+  const searchSingle = async () => {
     setSingleSearchLoading(true);
-    setSelectedParcelId(parcelSearchInput.trim());
-    setSingleSearchLoading(false);
+    try {
+      const identifier = parcelSearchInput.trim();
+      const trace = await api<TraceResponse>(`/api/history/trace/${encodeURIComponent(identifier)}`);
+      setSelectedParcelId(identifier);
+      const batchResults = trace.batch && Array.isArray(trace.batch.results) ? trace.batch.results : [];
+      const batchInputs = trace.batch && Array.isArray(trace.batch.input) ? trace.batch.input : [];
+      const inputId = identifier.toLowerCase();
+      const matchingBatchResult = batchResults.find((result) => result.parcelId.toLowerCase() === inputId);
+      const matchingBatchIndex = batchInputs.findIndex((parcel) => {
+        const inputId = identifier.toLowerCase();
+        return (parcel as { id?: string }).id?.toLowerCase() === inputId;
+      });
+      const matchingBatchInputResult =
+        matchingBatchIndex >= 0 ? batchResults[matchingBatchIndex] ?? null : null;
+      setSelectedSingleRecord(trace.single ?? trace.batch);
+      setSelectedSingleResult(
+        trace.single
+          ? (trace.single.results as RoutingResult)
+          : matchingBatchResult ??
+            matchingBatchInputResult,
+      );
+    } catch {
+      toast.error("Unable to load analytics");
+    } finally {
+      setSingleSearchLoading(false);
+    }
   };
 
-  const searchBatch = () => {
+  const searchBatch = async () => {
     setBatchSearchLoading(true);
-    setSelectedBatchId(batchSearchInput.trim());
-    setAnalyticsBatchPage(1);
-    setBatchSearchLoading(false);
+    try {
+      await refreshHistory();
+      setSelectedBatchId(batchSearchInput.trim());
+      setAnalyticsBatchPage(1);
+    } catch {
+      toast.error("Unable to load analytics");
+    } finally {
+      setBatchSearchLoading(false);
+    }
+  };
+
+  const loadSeededData = async () => {
+    setSeedDataLoading(true);
+    try {
+      await refreshHistory();
+      setSeedBatchPage(1);
+    } catch {
+      toast.error("Unable to load seeded data");
+    } finally {
+      setSeedDataLoading(false);
+    }
   };
 
   const copyAndToast = async (text: string) => {
@@ -842,7 +888,6 @@ function Dashboard({
       toast.success("Config applied");
       closeConfigModal();
       await refreshConfig();
-      await refreshHistory();
     } else {
       setModalMessage("Rule is valid");
       setConfigModalValidated(true);
@@ -907,8 +952,10 @@ function Dashboard({
         body: JSON.stringify({ action }),
       });
       toast.success("Backend seeded");
-      await refreshHistory();
       await refreshConfig();
+      if (profile.role === "operator" && page === "seed") {
+        await loadSeededData();
+      }
     } finally {
       setSeedConfirm(null);
     }
@@ -932,6 +979,12 @@ function Dashboard({
     );
   };
 
+  useEffect(() => {
+    if (page === "seed" && profile.role === "operator") {
+      void loadSeededData();
+    }
+  }, [page, profile.role]);
+
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
       <DashboardNav profile={profile} />
@@ -947,7 +1000,7 @@ function Dashboard({
               setSingleValidated(false);
               setSingleLocked(false);
             }}
-            className="mt-4 min-h-64 w-full rounded-[1.4rem] border border-white/10 bg-slate-950/70 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
+            className="mt-4 max-h-64 min-h-64 w-full resize-none overflow-auto rounded-[1.4rem] border border-white/10 bg-slate-950/70 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
           />
           <div className="mt-3 flex flex-wrap gap-3">
             <Button variant="secondary" onClick={() => void validateSingle()}>
@@ -1057,32 +1110,33 @@ function Dashboard({
       {page === "analytics" && (
         <Card className="space-y-4">
           <SectionTitle title="Analytics" text="Search by parcel id or batch id to trace routed records." />
-          {historyLoading && <p className="mt-4 text-sm text-slate-400">Loading analytics...</p>}
           <div className="mt-5 space-y-6">
             <SearchPanel
-              title="Single Parcel Table View"
+              title="Single"
               label="Search parcel id"
               value={parcelSearchInput}
               setValue={setParcelSearchInput}
               loading={singleSearchLoading}
               onSearch={searchSingle}
-              onClear={() => {
-                setParcelSearchInput("");
-                setSelectedParcelId("");
-              }}
-            >
-              <RouteResultsTable
-                rows={selectedSingle ? [selectedSingle.results as RoutingResult] : []}
-                batchId={null}
-                importedBy={selectedSingle?.importedBy}
-                createdAt={selectedSingle?.createdAt}
-                copyAndToast={copyAndToast}
-                compact
-                emptyText={selectedParcelId ? "No parcel found" : "Search a parcel ID to populate this table"}
-              />
-            </SearchPanel>
+            onClear={() => {
+              setParcelSearchInput("");
+              setSelectedParcelId("");
+              setSelectedSingleRecord(null);
+              setSelectedSingleResult(null);
+            }}
+          >
+            <RouteResultsTable
+              rows={selectedSingle ? [selectedSingle] : []}
+              batchId={selectedSingleRecord?.batchId}
+              importedBy={selectedSingleRecord?.importedBy}
+              createdAt={selectedSingleRecord?.createdAt}
+              copyAndToast={copyAndToast}
+              compact
+              emptyText={selectedParcelId ? "No parcel found" : "Search a parcel ID to populate this table"}
+            />
+          </SearchPanel>
             <SearchPanel
-              title="Batch Table View"
+              title="Batch"
               label="Search batch id"
               value={batchSearchInput}
               setValue={setBatchSearchInput}
@@ -1164,6 +1218,33 @@ function Dashboard({
               </Button>
             )}
           </div>
+          {profile.role === "operator" && (
+            <section className="mt-6">
+              <h3 className="text-lg font-semibold text-white">Seeded Batch Table View</h3>
+              {seedDataLoading && <p className="mt-3 text-sm text-slate-400">Loading seeded data...</p>}
+              {!seedDataLoading && (
+                <>
+                  <RouteResultsTable
+                    rows={seededBatch ? seededBatchSlice : []}
+                    batchId={seededBatch?.batchId}
+                    importedBy={seededBatch?.importedBy}
+                    createdAt={seededBatch?.createdAt}
+                    copyAndToast={copyAndToast}
+                    compact
+                    emptyText="No seeded batch data found"
+                  />
+                  {seededBatch && seededBatchResults.length > pageSize && (
+                    <Pager
+                      page={seedBatchPage}
+                      pageCount={seededBatchPageCount}
+                      onPrev={() => setSeedBatchPage((current) => Math.max(1, current - 1))}
+                      onNext={() => setSeedBatchPage((current) => Math.min(seededBatchPageCount, current + 1))}
+                    />
+                  )}
+                </>
+              )}
+            </section>
+          )}
         </Card>
       )}
 
@@ -1193,7 +1274,7 @@ function Dashboard({
                   setFailedSection(null);
                 }
               }}
-              className="mt-4 min-h-72 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
+              className="mt-4 max-h-72 min-h-72 w-full resize-none overflow-auto rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
             />
             {modalMessage && <p className="mt-3 text-sm text-emerald-300">{modalMessage}</p>}
             {configModalIssues.length > 0 && (
@@ -1659,7 +1740,7 @@ function formatConfigIssueField(issue: ValidationIssue) {
   if (normalizedField.includes("when.operator")) return "when.operator";
 
   if (normalizedField === "rules") {
-    if (/^Approval\s+.+\s+is repeated within the uploaded config\.$/.test(issue.reason)) {
+    if (/^Approval\s+.+\s+is already present\.$/.test(issue.reason)) {
       return "action.approval";
     }
     if (/^This editor accepts only\s+(approval|route)\s+rules\.$/.test(issue.reason)) {
