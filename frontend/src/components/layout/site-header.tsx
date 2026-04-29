@@ -1,7 +1,7 @@
 import { APP_NAME } from '@/lib/app-meta';
 import { Button } from '@/components/ui/button';
 import { BookOpenText, Home, LogOut, UserCircle2, type LucideIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type HeaderNavItem = {
   key: string;
@@ -31,6 +31,18 @@ export function SiteHeader({
   onNavigate,
 }: SiteHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onClickOutside = (event: MouseEvent) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
 
   const roleBadgeClass =
     profile?.role === 'admin'
@@ -61,16 +73,11 @@ export function SiteHeader({
                 </Button>
               </>
             ) : (
-              <div
-                className="relative"
-                onMouseEnter={() => setMenuOpen(true)}
-                onMouseLeave={() => setMenuOpen(false)}
-              >
+              <div className="relative" ref={menuRef}>
                 <Button
                   variant="ghost"
                   className="rounded-full px-1.5 py-1.5 text-slate-100 hover:bg-transparent"
-                  onFocus={() => setMenuOpen(true)}
-                  onBlur={() => setMenuOpen(false)}
+                  onClick={() => setMenuOpen((current) => !current)}
                   aria-label="Open account menu"
                 >
                   <UserCircle2 className="h-7 w-7 text-emerald-300" />

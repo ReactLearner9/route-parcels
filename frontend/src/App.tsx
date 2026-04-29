@@ -150,6 +150,19 @@ type SeedConfirmState = {
   confirmLabel: string;
 };
 
+type UiLogEvent = {
+  user: string;
+  sessionId?: string;
+  screen: string;
+  functionality: string;
+  feature: "single-import" | "batch-import" | "analytics" | "config" | "seed";
+  phase: "started" | "ended";
+  status?: "passed" | "failed" | "success" | "not_found" | "found";
+  timestamp?: string;
+  durationMs?: number;
+  details?: Record<string, unknown>;
+};
+
 const pageSize = 20;
 const issuePageSize = 10;
 const defaultSingle = JSON.stringify({ weight: 2, value: 1500 }, null, 2);
@@ -533,6 +546,21 @@ function LoginPage({
   );
 }
 
+async function logUiEvent(event: UiLogEvent) {
+  try {
+    const storedSessionId = sessionStorage.getItem("route-parcels-session-id");
+    const sessionId = storedSessionId ?? `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    if (!storedSessionId) sessionStorage.setItem("route-parcels-session-id", sessionId);
+    await fetch("/api/logs/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...event, sessionId, timestamp: event.timestamp ?? new Date().toISOString() }),
+    });
+  } catch {
+    // Intentionally ignore logger transport failures.
+  }
+}
+
 function DocsPage() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
@@ -659,8 +687,15 @@ function Dashboard({
     (batchIssuePage - 1) * issuePageSize,
     batchIssuePage * issuePageSize,
   );
-
   const validateSingle = async () => {
+    const startedAt = performance.now();
+    await logUiEvent({
+      user: profile.username,
+      screen: "Import Single",
+      functionality: "single_validate",
+      feature: "single-import",
+      phase: "started",
+    });
     try {
       const parsed = JSON.parse(singleText) as Record<string, unknown>;
       const report = await api<ValidationReport>("/api/upload/validate/single", {
@@ -679,6 +714,15 @@ function Dashboard({
         setFailedSection("single");
         toast.error("Single parcel needs changes");
       }
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Single",
+        functionality: "single_validate",
+        feature: "single-import",
+        phase: "ended",
+        status: report.valid ? "passed" : "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
     } catch (error) {
       setFailedRows([
         {
@@ -690,10 +734,27 @@ function Dashboard({
       setFailedSection("single");
       setSingleValidated(false);
       toast.error("Single parcel validation failed");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Single",
+        functionality: "single_validate",
+        feature: "single-import",
+        phase: "ended",
+        status: "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
     }
   };
 
   const routeSingle = async () => {
+    const startedAt = performance.now();
+    await logUiEvent({
+      user: profile.username,
+      screen: "Import Single",
+      functionality: "single_import",
+      feature: "single-import",
+      phase: "started",
+    });
     try {
       const parsed = JSON.parse(singleText) as Record<string, unknown>;
       const outcome = await api<SingleRouteOutcome>("/api/upload/single", {
@@ -706,8 +767,31 @@ function Dashboard({
       setFailedRows([]);
       setFailedSection(null);
       toast.success("Single parcel routed");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Single",
+        functionality: "single_import",
+        feature: "single-import",
+        phase: "ended",
+        status: "success",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: {
+          generatedParcelId: outcome.result.parcelId,
+          ruleMatched: outcome.result.route,
+          approvals: outcome.result.approvals,
+        },
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Single routing failed");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Single",
+        functionality: "single_import",
+        feature: "single-import",
+        phase: "ended",
+        status: "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
     }
   };
 
@@ -716,6 +800,15 @@ function Dashboard({
       toast.error("Choose a batch file first");
       return;
     }
+
+    const startedAt = performance.now();
+    await logUiEvent({
+      user: profile.username,
+      screen: "Import Batch",
+      functionality: "batch_validate",
+      feature: "batch-import",
+      phase: "started",
+    });
 
     try {
       const formData = new FormData();
@@ -736,11 +829,42 @@ function Dashboard({
         setFailedSection("batch");
         toast.error("Batch file needs changes");
       }
+
+      let totalCount = 0;
+      try {
+        const text = await batchFile.text();
+        const parsed = JSON.parse(text) as { parcels?: unknown[] };
+        totalCount = Array.isArray(parsed.parcels) ? parsed.parcels.length : 0;
+      } catch {
+        totalCount = 0;
+      }
+      const failedCount = new Set(report.issues.map((issue) => issue.rowNo)).size;
+      const passedCount = Math.max(0, totalCount - failedCount);
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Batch",
+        functionality: "batch_validate",
+        feature: "batch-import",
+        phase: "ended",
+        status: report.valid ? "passed" : "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { count: totalCount, failedCount, passedCount },
+      });
     } catch (error) {
       setFailedRows([{ rowNo: 1, field: "file", reason: error instanceof Error ? error.message : "Invalid batch file" }]);
       setFailedSection("batch");
       setBatchValidated(false);
       toast.error("Batch validation failed");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Batch",
+        functionality: "batch_validate",
+        feature: "batch-import",
+        phase: "ended",
+        status: "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { count: 0, failedCount: 0, passedCount: 0 },
+      });
     }
   };
 
@@ -749,6 +873,15 @@ function Dashboard({
       toast.error("Choose a batch file first");
       return;
     }
+
+    const startedAt = performance.now();
+    await logUiEvent({
+      user: profile.username,
+      screen: "Import Batch",
+      functionality: "batch_import",
+      feature: "batch-import",
+      phase: "started",
+    });
 
     try {
       const formData = new FormData();
@@ -764,8 +897,30 @@ function Dashboard({
       setFailedRows([]);
       setFailedSection(null);
       toast.success("Batch routed");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Batch",
+        functionality: "batch_import",
+        feature: "batch-import",
+        phase: "ended",
+        status: "success",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: {
+          generatedBatchId: outcome.batchId,
+          importedCount: outcome.results.length,
+        },
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Batch routing failed");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Import Batch",
+        functionality: "batch_import",
+        feature: "batch-import",
+        phase: "ended",
+        status: "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
     }
   };
 
@@ -794,9 +949,18 @@ function Dashboard({
   };
 
   const searchSingle = async () => {
+    const startedAt = performance.now();
+    const identifier = parcelSearchInput.trim();
+    await logUiEvent({
+      user: profile.username,
+      screen: "Analytics",
+      functionality: "single_search",
+      feature: "analytics",
+      phase: "started",
+      details: { searchId: identifier },
+    });
     setSingleSearchLoading(true);
     try {
-      const identifier = parcelSearchInput.trim();
       const trace = await api<TraceResponse>(`/api/history/trace/${encodeURIComponent(identifier)}`);
       setSelectedParcelId(identifier);
       const batchResults = trace.batch && Array.isArray(trace.batch.results) ? trace.batch.results : [];
@@ -816,21 +980,82 @@ function Dashboard({
           : matchingBatchResult ??
             matchingBatchInputResult,
       );
+      const found = Boolean(trace.single || matchingBatchResult || matchingBatchInputResult);
+      await logUiEvent({
+        user: profile.username,
+        screen: "Analytics",
+        functionality: "single_search",
+        feature: "analytics",
+        phase: "ended",
+        status: found ? "found" : "not_found",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { searchId: identifier },
+      });
     } catch {
       toast.error("Unable to load analytics");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Analytics",
+        functionality: "single_search",
+        feature: "analytics",
+        phase: "ended",
+        status: "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { searchId: identifier },
+      });
     } finally {
       setSingleSearchLoading(false);
     }
   };
 
   const searchBatch = async () => {
+    const startedAt = performance.now();
+    const identifier = batchSearchInput.trim();
+    await logUiEvent({
+      user: profile.username,
+      screen: "Analytics",
+      functionality: "batch_search",
+      feature: "analytics",
+      phase: "started",
+      details: { searchId: identifier },
+    });
     setBatchSearchLoading(true);
     try {
-      await refreshHistory();
-      setSelectedBatchId(batchSearchInput.trim());
+      const refreshed = await api<HistoryResponse>("/api/history");
+      setHistory(refreshed);
+      setSelectedBatchId(identifier);
       setAnalyticsBatchPage(1);
+      const matched = refreshed.batches.find((record) => {
+        const batchId = record.batchId ?? "";
+        const results = Array.isArray(record.results) ? record.results : [];
+        return (
+          batchId.toLowerCase() === identifier.toLowerCase() ||
+          results.some((result) => result.parcelId.toLowerCase() === identifier.toLowerCase())
+        );
+      });
+      const batchRecordCount = matched && Array.isArray(matched.results) ? matched.results.length : 0;
+      await logUiEvent({
+        user: profile.username,
+        screen: "Analytics",
+        functionality: "batch_search",
+        feature: "analytics",
+        phase: "ended",
+        status: matched ? "found" : "not_found",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { searchId: identifier, recordCount: batchRecordCount },
+      });
     } catch {
       toast.error("Unable to load analytics");
+      await logUiEvent({
+        user: profile.username,
+        screen: "Analytics",
+        functionality: "batch_search",
+        feature: "analytics",
+        phase: "ended",
+        status: "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { searchId: identifier },
+      });
     } finally {
       setBatchSearchLoading(false);
     }
@@ -866,6 +1091,16 @@ function Dashboard({
   };
 
   const submitConfig = async (section: "approval" | "route", mode: "validate" | "apply", rules: ConfigRule[]) => {
+    const startedAt = performance.now();
+    const configAction = mode === "apply" ? (configModal?.mode === "edit" ? "rule_modify" : "rule_add") : "rule_validate";
+    await logUiEvent({
+      user: profile.username,
+      screen: "Config",
+      functionality: configAction,
+      feature: "config",
+      phase: "started",
+      details: { ruleType: section },
+    });
     const endpoint = `/api/config/${section === "approval" ? "approval" : "routing"}/${mode}`;
     const formData = new FormData();
     formData.append("configFile", new File([JSON.stringify({ rules }, null, 2)], "config.json", { type: "application/json" }));
@@ -881,6 +1116,16 @@ function Dashboard({
       setConfigModalIssues(report.issues);
       setModalMessage(null);
       setConfigModalValidated(false);
+      await logUiEvent({
+        user: profile.username,
+        screen: "Config",
+        functionality: configAction,
+        feature: "config",
+        phase: "ended",
+        status: "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { ruleType: section },
+      });
       return false;
     }
 
@@ -896,6 +1141,16 @@ function Dashboard({
     setFailedRows([]);
     setFailedSection(null);
     setConfigModalIssues([]);
+    await logUiEvent({
+      user: profile.username,
+      screen: "Config",
+      functionality: configAction,
+      feature: "config",
+      phase: "ended",
+      status: "success",
+      durationMs: Math.round(performance.now() - startedAt),
+      details: { ruleType: section },
+    });
     return true;
   };
 
@@ -945,6 +1200,15 @@ function Dashboard({
   };
 
   const seedData = async (action: "all" | "config") => {
+    const startedAt = performance.now();
+    await logUiEvent({
+      user: profile.username,
+      screen: "Seed",
+      functionality: "seed_execute",
+      feature: "seed",
+      phase: "started",
+      details: { seedType: action === "config" ? "config" : "parcel" },
+    });
     try {
       await api("/api/seed", {
         method: "POST",
@@ -956,6 +1220,16 @@ function Dashboard({
       if (profile.role === "operator" && page === "seed") {
         await loadSeededData();
       }
+      await logUiEvent({
+        user: profile.username,
+        screen: "Seed",
+        functionality: "seed_execute",
+        feature: "seed",
+        phase: "ended",
+        status: "success",
+        durationMs: Math.round(performance.now() - startedAt),
+        details: { seedType: action === "config" ? "config" : "parcel" },
+      });
     } finally {
       setSeedConfirm(null);
     }
@@ -984,6 +1258,22 @@ function Dashboard({
       void loadSeededData();
     }
   }, [page, profile.role]);
+
+  useEffect(() => {
+    if (page !== "rules") return;
+    void logUiEvent({
+      user: profile.username,
+      screen: "Config",
+      functionality: "rules_count",
+      feature: "config",
+      phase: "ended",
+      status: "success",
+      details: {
+        approvalRulesCount: approvalRules.length,
+        routingRulesCount: routingRules.length,
+      },
+    });
+  }, [page, approvalRules.length, routingRules.length, profile.username]);
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
