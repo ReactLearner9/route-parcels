@@ -1,8 +1,13 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 :root {
   color-scheme: dark;
-  --app-bg: #0b1110;
+  --app-bg: #08110f;
+  --app-panel: rgba(7, 18, 16, 0.76);
+  --app-panel-strong: rgba(6, 14, 13, 0.92);
+  --app-border: rgba(148, 163, 184, 0.14);
+  --app-glow: rgba(16, 185, 129, 0.18);
 }
 
 html {
@@ -13,11 +18,12 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at top, rgba(34, 197, 94, 0.18), transparent 32%),
-    radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.12), transparent 30%),
-    linear-gradient(180deg, #0b1110 0%, #111827 55%, #0b1110 100%);
+    radial-gradient(circle at 12% 0%, rgba(16, 185, 129, 0.16), transparent 26%),
+    radial-gradient(circle at 88% 8%, rgba(56, 189, 248, 0.12), transparent 24%),
+    linear-gradient(180deg, #08110f 0%, #0d1720 48%, #09110f 100%);
   color: #e5e7eb;
   font-family:
+    "Plus Jakarta Sans",
     Inter,
     ui-sans-serif,
     system-ui,
@@ -25,10 +31,25 @@ body {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+  line-height: 1.5;
 }
 
 * {
   box-sizing: border-box;
+}
+
+*::selection {
+  background: rgba(52, 211, 153, 0.24);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 18%),
+    radial-gradient(circle at top, rgba(16, 185, 129, 0.08), transparent 34%);
 }
 
 a {
@@ -58,4 +79,75 @@ textarea {
 input::placeholder,
 textarea::placeholder {
   color: #6b7280;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.52);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.65);
+  background-clip: padding-box;
+}
+
+[data-sonner-toast] {
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(15, 23, 42, 0.9) 42%),
+    rgba(15, 23, 42, 0.9) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 18px 48px rgba(0, 0, 0, 0.34) !important;
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+[data-sonner-toast]::before {
+  content: "";
+  position: absolute;
+  inset: 1px 1px auto 1px;
+  height: 45%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent);
+  pointer-events: none;
+}
+
+[data-sonner-toast] [data-title] {
+  color: #f8fafc !important;
+}
+
+[data-sonner-toast] [data-description] {
+  color: #cbd5e1 !important;
+}
+
+.stack-marquee {
+  animation: stack-marquee 28s linear infinite;
+}
+
+@keyframes stack-marquee {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
 }

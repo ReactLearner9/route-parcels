@@ -1,13 +1,20 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  BadgeCheck,
+  BookOpenText,
+  CheckCircle2,
   Copy,
+  Eraser,
   Eye,
+  FileText,
   FileUp,
   Home,
-  Menu,
+  LogOut,
+  Pencil,
+  Plus,
   Search,
   ShieldCheck,
-  UserCircle2,
+  Users,
   X,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
@@ -18,98 +25,144 @@ import { APP_NAME } from "@/lib/app-meta";
 import AIUsageDocs from "../docs/ai-usage.mdx";
 
 type View = "landing" | "login" | "docs" | "dashboard";
-type DashboardPage =
-  | "single"
-  | "batch"
-  | "analytics"
-  | "rules"
-  | "trace"
-  | "seed";
 type Role = "admin" | "operator";
 type AuthMode = "login" | "register";
+type DashboardPage = "single" | "batch" | "analytics" | "rules" | "seed";
+type RouteStatus = "processed" | "approval pending" | "defaulted" | "errored";
+type DashboardNavItem = { key: DashboardPage; label: string; icon: typeof Search };
 
-type UserProfile = { id: string; name: string; email: string; role: Role };
+type UserProfile = { id: string; username: string; role: Role };
+type LoginForm = { username: string; password: string; role: Role };
+
+type ValidationIssue = {
+  rowNo: number;
+  field: string;
+  reason: string;
+};
+
+type ValidationReport = {
+  valid: boolean;
+  issues: ValidationIssue[];
+};
+
+type RoutingResult = {
+  parcelId: string;
+  route: string;
+  approvals: string[];
+  toBeRouted: string;
+  routedTo: string;
+  status?: RouteStatus;
+  reason?: string;
+};
+
+type SingleRouteOutcome = {
+  status: RouteStatus;
+  createdAt?: string;
+  importedBy?: string;
+  result: RoutingResult;
+};
+
+type BatchRouteOutcome = {
+  status: RouteStatus;
+  batchId?: string;
+  createdAt?: string;
+  importedBy?: string;
+  results: RoutingResult[];
+};
+
+type StoredParcelRecord = {
+  batchId?: string;
+  source: "single" | "batch";
+  createdAt: string;
+  importedBy: string;
+  input: unknown;
+  results: RoutingResult | RoutingResult[];
+};
+
 type AuditRow = {
   id: string;
-  fileId: string;
+  batchId: string;
   source: "single" | "batch" | "config";
   step: string;
   createdAt: string;
+  actor?: string;
   message: string;
   parcelIds?: string[];
   route?: string;
   details?: Record<string, unknown>;
 };
+
 type HistoryResponse = {
-  singles: Array<{
-    fileId: string;
-    createdAt: string;
-    input: { id: string; weight: number; value: number };
-    results: { parcelId: string; route: string; approvals: string[] };
-  }>;
-  batches: Array<{
-    fileId: string;
-    createdAt: string;
-    input: Array<{ id: string; weight: number; value: number }>;
-    results: Array<{ parcelId: string; route: string; approvals: string[] }>;
-  }>;
+  singles: StoredParcelRecord[];
+  batches: StoredParcelRecord[];
   audits: AuditRow[];
 };
-type ConfigResponse = {
-  currentVersion: number;
-  currentConfig: unknown | null;
-  versions: Array<{
-    changeId: string;
-    version: number;
-    createdAt: string;
-    checksum: string;
-    config: unknown;
-  }>;
-};
-type LoginForm = { email: string; password: string; name: string; role: Role };
 
-const loginSeed: LoginForm = {
-  email: "admin@routeparcels.local",
-  password: "admin123",
-  name: "Admin User",
-  role: "admin",
+type Condition = {
+  field: string;
+  operator: ">" | "<" | ">=" | "<=" | "==" | "is_true" | "is_false";
+  value?: unknown;
 };
-const defaultSingle = JSON.stringify(
+
+type ApprovalRule = {
+  type: "approval";
+  when: Condition;
+  action: { approval: string };
+  createdBy?: string;
+  createdAt?: string;
+  lastModifiedBy?: string;
+  lastModifiedAt?: string;
+};
+
+type RouteRule = {
+  type: "route";
+  priority: number;
+  when: Condition;
+  action: { department: string };
+  createdBy?: string;
+  createdAt?: string;
+  lastModifiedBy?: string;
+  lastModifiedAt?: string;
+};
+
+type ConfigRule = ApprovalRule | RouteRule;
+type ConfigResponse = {
+  approvalConfig?: { rules: ApprovalRule[] } | null;
+  routingConfig?: { rules: RouteRule[] } | null;
+  currentConfig?: { rules: ConfigRule[] } | null;
+};
+
+type ConfigModalState = {
+  section: "approval" | "route";
+  mode: "new" | "edit";
+  index?: number;
+};
+
+type SeedConfirmState = {
+  action: "all" | "config";
+  title: string;
+  message: string;
+  confirmLabel: string;
+};
+
+const pageSize = 20;
+const issuePageSize = 10;
+const defaultSingle = JSON.stringify({ weight: 2, value: 1500 }, null, 2);
+const defaultApprovalRule = JSON.stringify(
   {
-    id: "P-100",
-    weight: 2,
-    value: 1500,
-    destinationCountry: "DE",
-    isFragile: true,
+    type: "approval",
+    when: { field: "value", operator: ">", value: 1000 },
+    action: { approval: "INSURANCE" },
   },
   null,
   2,
 );
-const defaultConfig = JSON.stringify(
+const defaultRoutingRule = JSON.stringify(
   {
-    rules: [
-      {
-        name: "insurance",
-        type: "approval",
-        priority: 50,
-        when: { field: "value", operator: ">", value: 1000 },
-        action: { approval: "INSURANCE" },
-      },
-      {
-        name: "fragile",
-        type: "approval",
-        priority: 40,
-        when: { field: "isFragile", operator: "is_true" },
-        action: { approval: "FRAGILE_HANDLING" },
-      },
-      {
-        name: "regular",
-        type: "route",
-        priority: 5,
-        when: { field: "weight", operator: "<=", value: 10 },
-        action: { department: "REGULAR" },
-      },
-    ],
+    type: "route",
+    priority: 1,
+    when: { field: "weight", operator: "<=", value: 1 },
+    action: { department: "MAIL" },
   },
   null,
   2,
@@ -117,13 +170,13 @@ const defaultConfig = JSON.stringify(
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  const payload = await response.json().catch(() => null);
   if (!response.ok) throw new Error(payload?.error ?? "Request failed");
   return payload as T;
 }
 
-function formatTime(value: string) {
+function formatTime(value?: string) {
+  if (!value) return "n/a";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -137,17 +190,14 @@ function useStoredProfile() {
     const raw = localStorage.getItem("route-parcels-profile");
     return raw ? (JSON.parse(raw) as UserProfile) : null;
   });
+
   const save = (next: UserProfile | null) => {
     setProfile(next);
-    if (next)
-      localStorage.setItem("route-parcels-profile", JSON.stringify(next));
+    if (next) localStorage.setItem("route-parcels-profile", JSON.stringify(next));
     else localStorage.removeItem("route-parcels-profile");
   };
-  return [profile, save] as const;
-}
 
-function copyText(text: string) {
-  return navigator.clipboard.writeText(text);
+  return [profile, save] as const;
 }
 
 function PasswordField({
@@ -182,40 +232,35 @@ function PasswordField({
 function LandingPage({
   profile,
   onGoLogin,
-  onGoDocs,
   onGoDashboard,
 }: {
   profile: UserProfile | null;
   onGoLogin: () => void;
-  onGoDocs: () => void;
   onGoDashboard: () => void;
 }) {
   const [stats, setStats] = useState({
-    parcelsProcessed: 0,
-    filesProcessed: 0,
-    activeRoutes: 0,
+    parcelsRouted: 0,
+    filesImported: 0,
   });
 
   useEffect(() => {
     const loadStats = async () => {
       try {
         const history = await api<HistoryResponse>("/api/history");
-        const parcelsProcessed =
-          history.singles.length +
-          history.batches.reduce(
-            (total, batch) => total + batch.input.length,
-            0,
-          );
-        const filesProcessed = history.singles.length + history.batches.length;
-        const activeRoutes = new Set([
-          ...history.singles.map((entry) => entry.results.route),
-          ...history.batches.flatMap((entry) =>
-            entry.results.map((result) => result.route),
-          ),
-        ]).size;
-        setStats({ parcelsProcessed, filesProcessed, activeRoutes });
+        const singleResults = history.singles.map((record) => record.results as RoutingResult);
+        const batchResults = history.batches.flatMap((record) =>
+          Array.isArray(record.results) ? record.results : [],
+        );
+        const allResults = [...singleResults, ...batchResults];
+        setStats({
+          parcelsRouted: allResults.length,
+          filesImported: history.singles.length + history.batches.length,
+        });
       } catch {
-        setStats({ parcelsProcessed: 0, filesProcessed: 0, activeRoutes: 0 });
+        setStats({
+          parcelsRouted: 0,
+          filesImported: 0,
+        });
       }
     };
 
@@ -223,261 +268,183 @@ function LandingPage({
   }, []);
 
   return (
-    <main className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-7xl flex-col gap-10 overflow-y-auto px-4 py-8 sm:px-6 lg:px-8">
-      <section className="min-h-[78vh] rounded-[2rem] border border-emerald-400/20 bg-gradient-to-br from-emerald-950 via-slate-950 to-slate-900 p-6 sm:p-10">
-        <div className="relative flex h-full flex-col justify-between gap-10">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,197,94,0.18),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(16,185,129,0.12),transparent_28%)]" />
-          <div className="relative flex flex-1 flex-col justify-between gap-10">
-            <div>
-              <p className="mt-6 text-xs uppercase tracking-[0.5em] text-emerald-300">
-                {APP_NAME}
-              </p>
-              <h1 className="mt-4 max-w-3xl text-5xl font-semibold tracking-tight text-white sm:text-7xl">
-                A modern platform for routing, review, and traceability.
-              </h1>
-              <p className="mt-6 max-w-3xl text-base leading-8 text-slate-300 sm:text-lg">
-                Route Parcels gives operators and admins a clean place to import
-                parcels, manage rules, inspect audit logs, and trace every file
-                or parcel without leaving the app.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={profile ? onGoDashboard : onGoLogin}>
-                <Home className="h-4 w-4" />
-                <span className="ml-2">{profile ? "Home" : "Get started"}</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="min-h-[42vh] rounded-[2rem] border border-white/10 bg-white/5 p-6 sm:p-10">
-        <p className="text-xs uppercase tracking-[0.4em] text-emerald-300">
-          Live Analytics
+    <main className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+      <section className="overflow-hidden rounded-[2rem] border border-emerald-400/20 bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.16),transparent_24%),linear-gradient(135deg,rgba(7,18,16,0.96),rgba(14,25,32,0.96))] px-6 py-8 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:px-8 sm:py-10">
+        <p className="text-xs uppercase tracking-[0.5em] text-emerald-300">
+          {APP_NAME}
         </p>
-        <h2 className="mt-4 text-3xl font-semibold text-white sm:text-5xl">
-          Simple operational totals
-        </h2>
-        <div className="mt-8 flex flex-col gap-4">
-          {[
-            {
-              label: "Parcels processed",
-              value: stats.parcelsProcessed.toLocaleString(),
-            },
-            {
-              label: "Files processed",
-              value: stats.filesProcessed.toLocaleString(),
-            },
-            {
-              label: "Active routes",
-              value: stats.activeRoutes.toLocaleString(),
-            },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-3xl border border-white/10 bg-slate-950/70 px-5 py-6"
-            >
-              <p className="text-sm uppercase tracking-[0.35em] text-slate-400">
-                {stat.label}
-              </p>
-              <p className="mt-3 text-4xl font-semibold text-white">
-                {stat.value}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="min-h-[48vh] rounded-[2rem] border border-white/10 bg-slate-950/70 p-6 sm:p-10">
-        <p className="text-xs uppercase tracking-[0.4em] text-emerald-300">
-          Stack
+        <h1 className="mt-4 max-w-4xl text-4xl font-semibold tracking-tight text-white sm:text-6xl">
+          A modern platform for routing, review, and traceability.
+        </h1>
+        <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 sm:text-base">
+          Import parcels, validate rule-driven data, manage routing rules, and trace outcomes from one operator-friendly dashboard.
         </p>
-        <h2 className="mt-4 text-3xl font-semibold text-white sm:text-5xl">
-          Built with the original library brands
-        </h2>
-        <div className="mt-8 flex flex-col gap-4">
-          <StackRow
-            label="React"
-            icon={
-              <BrandIcon
-                src="https://cdn.simpleicons.org/react"
-                alt="React logo"
-              />
-            }
-            description="UI layer and component runtime"
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Button onClick={profile ? onGoDashboard : onGoLogin}>
+            <Home className="h-4 w-4" />
+            <span>{profile ? "Dashboard" : "Get started"}</span>
+          </Button>
+        </div>
+        <div className="mt-7 grid max-w-2xl gap-3 sm:grid-cols-2">
+          <LandingStat label="Parcels Routed" value={stats.parcelsRouted} />
+          <LandingStat label="Files Imported" value={stats.filesImported} />
+        </div>
+      </section>
+      <section className="space-y-6 rounded-[2rem] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
+        <div className="max-w-3xl">
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Features</p>
+          <h2 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">
+            Everything needed to move parcels cleanly
+          </h2>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FeatureCard
+            icon={<BadgeCheck className="h-5 w-5" />}
+            title="Import Single"
+            text="Quickly paste one parcel, check it, and route it without worrying about duplicate clicks."
           />
-          <StackRow
-            label="Vite"
-            icon={
-              <BrandIcon
-                src="https://cdn.simpleicons.org/vite"
-                alt="Vite logo"
-              />
-            }
-            description="Fast frontend build tooling"
+          <FeatureCard
+            icon={<FileUp className="h-5 w-5" />}
+            title="Import Batch"
+            text="Upload a batch file, review it, and send the parcels through in one flow."
           />
-          <StackRow
-            label="Tailwind CSS"
-            icon={
-              <BrandIcon
-                src="https://cdn.simpleicons.org/tailwindcss"
-                alt="Tailwind CSS logo"
-              />
-            }
-            description="Utility-first styling system"
+          <FeatureCard
+            icon={<Search className="h-5 w-5" />}
+            title="Analytics Search"
+            text="Look up parcels or batch files and see the routing history in clear table views."
           />
-          <StackRow
-            label="Express"
-            icon={
-              <BrandIcon
-                src="https://cdn.simpleicons.org/express/ffffff"
-                alt="Express logo"
-              />
-            }
-            description="Backend API server"
-          />
-          <StackRow
-            label="TypeScript"
-            icon={
-              <BrandIcon
-                src="https://cdn.simpleicons.org/typescript"
-                alt="TypeScript logo"
-              />
-            }
-            description="Shared type-safe application code"
-          />
-          <StackRow
-            label="Zod"
-            icon={
-              <BrandIcon src="https://cdn.simpleicons.org/zod" alt="Zod logo" />
-            }
-            description="Input validation and schemas"
+          <FeatureCard
+            icon={<ShieldCheck className="h-5 w-5" />}
+            title="Config"
+            text="Admins can create and update routing rules from one place, with validation keeping changes tidy."
           />
         </div>
       </section>
-
-      <section className="rounded-[2rem] border border-white/10 bg-white/5 p-6 sm:p-10">
-        <div className="mx-auto max-w-4xl text-center">
-          <p className="text-xs uppercase tracking-[0.4em] text-emerald-300">
-            Users
-          </p>
-          <h2 className="mt-4 text-3xl font-semibold text-white sm:text-5xl">
-            Who uses Route Parcels
+      <section className="space-y-6">
+        <div className="max-w-3xl">
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Users</p>
+          <h2 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">
+            Who uses the system and what they can do
           </h2>
-          <div className="mt-10 grid gap-4 md:grid-cols-2">
-            <CapabilityCard
-              icon={<UserCircle2 className="h-6 w-6" />}
-              title="Operators"
-              items={[
-                "Import single parcels",
-                "Upload batch files",
-                "Trace parcel and file IDs",
-              ]}
-            />
-            <CapabilityCard
-              icon={<ShieldCheck className="h-6 w-6" />}
-              title="Admins"
-              items={[
-                "Validate and apply configs",
-                "Review analytics",
-                "Inspect config audit data",
-              ]}
-            />
-          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <UserCard
+            icon={<ShieldCheck className="h-6 w-6" />}
+            title="Admins"
+            items={[
+              "Create and modify approval rules",
+              "Create and modify routing rules",
+              "Reset seeded config data when needed",
+            ]}
+          />
+          <UserCard
+            icon={<Users className="h-6 w-6" />}
+            title="Users"
+            items={[
+              "Import and route a single parcel",
+              "Upload and import batch parcel files",
+              "Review validation issues before routing",
+            ]}
+          />
         </div>
       </section>
-
-      <section className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-6 sm:p-10">
-        <div className="mx-auto max-w-4xl text-center">
-          <p className="text-xs uppercase tracking-[0.4em] text-emerald-300">
-            Trace and Analytics
-          </p>
-          <h2 className="mt-4 text-3xl font-semibold text-white sm:text-5xl">
-            Keep every parcel visible
-          </h2>
-          <div className="mt-10 grid gap-4 md:grid-cols-2">
-            <CapabilityCard
-              icon={<Search className="h-6 w-6" />}
-              title="Analytics"
-              items={[
-                "Filter audits",
-                "Open config data",
-                "Jump to trace instantly",
-              ]}
-            />
-            <CapabilityCard
-              icon={<Eye className="h-6 w-6" />}
-              title="Trace"
-              items={[
-                "Open parcel history",
-                "Inspect full trace payload",
-                "Copy trace data",
-              ]}
-            />
-          </div>
+      <section className="space-y-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Stack</p>
         </div>
+        <StackCarousel />
       </section>
     </main>
   );
 }
 
-function StackRow({
-  label,
-  description,
-  icon,
-}: {
-  label: string;
-  description: string;
-  icon: ReactNode;
-}) {
+function LandingStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center gap-4 rounded-3xl border border-white/10 bg-white/5 px-5 py-5">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-slate-950">
-        {icon}
-      </div>
-      <div>
-        <p className="text-lg font-semibold text-white">{label}</p>
-        <p className="mt-1 text-sm text-slate-300">{description}</p>
-      </div>
+    <div className="rounded-[1.4rem] border border-white/10 bg-slate-950/55 px-5 py-4 backdrop-blur-xl">
+      <p className="text-2xl font-semibold text-white sm:text-3xl">{value}</p>
+      <p className="mt-1 text-xs uppercase tracking-[0.25em] text-emerald-200">{label}</p>
     </div>
   );
 }
 
-function CapabilityCard({
+function FeatureCard({
+  icon,
+  title,
+  text,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+}) {
+  return (
+    <Card className="flex h-full min-h-56 flex-col items-start justify-between text-left">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300 shadow-lg shadow-emerald-950/20">
+        {icon}
+      </div>
+      <div className="mt-10 min-w-0">
+        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-300">{text}</p>
+      </div>
+    </Card>
+  );
+}
+
+function UserCard({
   icon,
   title,
   items,
 }: {
-  icon: ReactNode;
+  icon: React.ReactNode;
   title: string;
   items: string[];
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/70 px-6 py-8 text-left">
-      <div className="flex items-center gap-3 text-emerald-300">
+    <Card className="flex h-full flex-col items-start text-left">
+      <div className="flex h-16 w-16 items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400/10 text-emerald-300 shadow-lg shadow-emerald-950/20">
         {icon}
-        <p className="text-lg font-semibold text-white">{title}</p>
       </div>
-      <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
+      <h3 className="mt-4 text-xl font-semibold text-white">{title}</h3>
+      <ul className="mt-5 w-full max-w-sm space-y-3 text-sm leading-6 text-slate-300">
         {items.map((item) => (
-          <li key={item} className="flex items-start gap-3">
-            <span className="mt-2 h-1.5 w-1.5 rounded-full bg-emerald-300" />
-            {item}
+          <li key={item} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-3">
+            <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-300" />
+            <span>{item}</span>
           </li>
         ))}
       </ul>
-    </div>
+    </Card>
   );
 }
 
-function BrandIcon({ src, alt }: { src: string; alt: string }) {
+function StackCarousel() {
+  const items = [
+    { label: "React", src: "https://cdn.simpleicons.org/react" },
+    { label: "Vite", src: "https://cdn.simpleicons.org/vite" },
+    { label: "Tailwind CSS", src: "https://cdn.simpleicons.org/tailwindcss" },
+    { label: "Express", src: "https://cdn.simpleicons.org/express/ffffff" },
+    { label: "TypeScript", src: "https://cdn.simpleicons.org/typescript" },
+    { label: "Zod", src: "https://cdn.simpleicons.org/zod" },
+    { label: "Pino", src: "https://cdn.simpleicons.org/pino" },
+    { label: "LowDB", src: "https://cdn.simpleicons.org/json/ffffff" },
+  ];
+  const track = [...items, ...items];
+
   return (
-    <img
-      src={src}
-      alt={alt}
-      className="h-7 w-7 object-contain"
-      loading="lazy"
-    />
+    <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 py-6">
+      <div className="stack-marquee flex w-max gap-4 px-4">
+        {track.map((item, index) => (
+          <div
+            key={`${item.label}-${index}`}
+            className="flex min-w-[15rem] items-center justify-center gap-4 rounded-3xl border border-white/10 bg-slate-950/80 px-5 py-4"
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-slate-950">
+              <img src={item.src} alt={`${item.label} logo`} className="h-7 w-7 object-contain" loading="lazy" />
+            </div>
+            <p className="text-lg font-semibold text-white">{item.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -486,37 +453,39 @@ function LoginPage({
 }: {
   onLogin: (form: LoginForm, mode: AuthMode) => Promise<void>;
 }) {
-  const [form, setForm] = useState<LoginForm>(loginSeed);
+  const [form, setForm] = useState<LoginForm>({
+    username: "admin",
+    password: "admin123",
+    role: "admin",
+  });
   const [mode, setMode] = useState<AuthMode>("login");
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <main className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
-      <Card className="border-emerald-400/20">
-        <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">
-          {mode === "login" ? "Login" : "Register"}
-        </p>
-        <h1 className="mt-3 text-3xl font-semibold text-white">
-          {mode === "login" ? "Sign in to continue" : "Create your account"}
+    <main className="mx-auto grid max-w-5xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
+      <section className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.14),transparent_30%),linear-gradient(160deg,rgba(8,17,15,0.96),rgba(15,23,42,0.88))] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:p-8">
+        <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">Access</p>
+        <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
+          {mode === "login" ? "Sign in and keep parcels moving." : "Create an account for your routing workspace."}
         </h1>
-        <p className="mt-3 text-sm text-slate-300">
-          {mode === "login"
-            ? "Use your existing account."
-            : "Create a profile and sign in immediately after registration."}
+        <p className="mt-4 max-w-xl text-sm leading-7 text-slate-300">
+          Use the same streamlined workspace for imports, validation, trace history, and configuration changes.
         </p>
+      </section>
+      <Card className="border-emerald-400/16">
+        <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">{mode === "login" ? "Login" : "Register"}</p>
+        <h2 className="mt-3 text-2xl font-semibold text-white">
+          {mode === "login" ? "Welcome back" : "Set up your account"}
+        </h2>
         <form
-          className="mt-6 grid gap-3"
+          className="mt-6 grid gap-3.5"
           onSubmit={async (event) => {
             event.preventDefault();
             try {
               setError(null);
               await onLogin(form, mode);
             } catch (loginError) {
-              setError(
-                loginError instanceof Error
-                  ? loginError.message
-                  : "Login failed",
-              );
+              setError(loginError instanceof Error ? loginError.message : "Login failed");
             }
           }}
         >
@@ -525,56 +494,33 @@ function LoginPage({
               className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
               value={form.role}
               onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  role: event.target.value as Role,
-                }))
+                setForm((current) => ({ ...current, role: event.target.value as Role }))
               }
             >
               <option value="operator">Operator</option>
               <option value="admin">Admin</option>
             </select>
           )}
-          {mode === "register" && (
-            <input
-              className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
-              value={form.name}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, name: event.target.value }))
-              }
-              placeholder="Name"
-            />
-          )}
           <input
             className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
-            value={form.email}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, email: event.target.value }))
-            }
-            placeholder="Email"
+            value={form.username}
+            onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+            placeholder="Username"
           />
           <PasswordField
             value={form.password}
-            onChange={(value) =>
-              setForm((current) => ({ ...current, password: value }))
-            }
+            onChange={(value) => setForm((current) => ({ ...current, password: value }))}
           />
-          <div className="flex gap-3">
-            <Button type="submit">
-              {mode === "login" ? "Login" : "Register"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() =>
-                setMode((current) =>
-                  current === "login" ? "register" : "login",
-                )
-              }
-            >
-              {mode === "login" ? "Register" : "Switch to login"}
-            </Button>
-          </div>
+            <div className="flex flex-wrap gap-3 pt-1">
+              <Button type="submit">{mode === "login" ? "Login" : "Register"}</Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setMode((current) => (current === "login" ? "register" : "login"))}
+              >
+                {mode === "login" ? "Register" : "Switch to login"}
+              </Button>
+            </div>
           {error && <p className="text-sm text-rose-300">{error}</p>}
         </form>
       </Card>
@@ -584,8 +530,8 @@ function LoginPage({
 
 function DocsPage() {
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
-      <Card>
+    <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+      <Card className="border-white/10 bg-slate-950/55">
         <AIUsageDocs />
       </Card>
     </main>
@@ -594,682 +540,1220 @@ function DocsPage() {
 
 function Dashboard({
   profile,
-  onLogout,
+  page,
+  onPageChange,
 }: {
   profile: UserProfile;
-  onLogout: () => void;
+  page: DashboardPage;
+  onPageChange: (page: DashboardPage) => void;
 }) {
-  const [page, setPage] = useState<DashboardPage>("single");
-  const [menuOpen, setMenuOpen] = useState(true);
-  const [history, setHistory] = useState<HistoryResponse>({
-    singles: [],
-    batches: [],
-    audits: [],
-  });
-  const [configState, setConfigState] = useState<ConfigResponse | null>(null);
-  const [search, setSearch] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<
-    "all" | "single" | "batch" | "config"
-  >("all");
-  const [traceData, setTraceData] = useState<unknown>(null);
-  const [traceId, setTraceId] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-  const [singleText, setSingleText] = useState(defaultSingle);
-  const [configText, setConfigText] = useState(defaultConfig);
+  const [history, setHistory] = useState<HistoryResponse>({ singles: [], batches: [], audits: [] });
   const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [configState, setConfigState] = useState<ConfigResponse | null>(null);
+  const [singleText, setSingleText] = useState(defaultSingle);
+  const [singleValidated, setSingleValidated] = useState(false);
+  const [singleOutcome, setSingleOutcome] = useState<SingleRouteOutcome | null>(null);
+  const [singleLocked, setSingleLocked] = useState(false);
   const [batchFile, setBatchFile] = useState<File | null>(null);
-  const [batchFileName, setBatchFileName] = useState<string | null>(null);
-  const [modalData, setModalData] = useState<{
-    title: string;
-    data: unknown;
-  } | null>(null);
+  const [batchValidated, setBatchValidated] = useState(false);
+  const [batchOutcome, setBatchOutcome] = useState<BatchRouteOutcome | null>(null);
+  const [batchLocked, setBatchLocked] = useState(false);
+  const [batchUploadPage, setBatchUploadPage] = useState(1);
+  const [analyticsBatchPage, setAnalyticsBatchPage] = useState(1);
+  const [batchIssuePage, setBatchIssuePage] = useState(1);
+  const [failedRows, setFailedRows] = useState<ValidationIssue[]>([]);
+  const [failedSection, setFailedSection] = useState<"single" | "batch" | "config" | null>(null);
+  const [parcelSearchInput, setParcelSearchInput] = useState("");
+  const [batchSearchInput, setBatchSearchInput] = useState("");
+  const [selectedParcelId, setSelectedParcelId] = useState("");
+  const [selectedBatchId, setSelectedBatchId] = useState("");
+  const [singleSearchLoading, setSingleSearchLoading] = useState(false);
+  const [batchSearchLoading, setBatchSearchLoading] = useState(false);
+  const [configModal, setConfigModal] = useState<ConfigModalState | null>(null);
+  const [configModalText, setConfigModalText] = useState("");
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [configModalIssues, setConfigModalIssues] = useState<ValidationIssue[]>([]);
+  const [configModalValidated, setConfigModalValidated] = useState(false);
+  const [seedConfirm, setSeedConfirm] = useState<SeedConfirmState | null>(null);
+  const batchFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const menuItems = [
-    { key: "single", label: "Import Single", icon: FileUp },
-    { key: "batch", label: "Import Batch", icon: FileUp },
-    { key: "analytics", label: "Analytics", icon: Search },
-    { key: "rules", label: "Config", icon: ShieldCheck },
-    { key: "trace", label: "Trace", icon: UserCircle2 },
-    { key: "seed", label: "Seed Data", icon: ShieldCheck },
-  ] as const;
+  const visiblePages = useMemo<DashboardNavItem[]>(
+    () =>
+      profile.role === "admin"
+        ? [
+            { key: "analytics", label: "Analytics", icon: Search },
+            { key: "rules", label: "Config", icon: ShieldCheck },
+            { key: "seed", label: "Seed", icon: FileText },
+          ]
+        : [
+            { key: "single", label: "Single", icon: BadgeCheck },
+            { key: "batch", label: "Batch", icon: FileUp },
+            { key: "analytics", label: "Analytics", icon: Search },
+            { key: "seed", label: "Seed", icon: FileText },
+          ],
+    [profile.role],
+  );
+
+  useEffect(() => {
+    if (!visiblePages.some((entry) => entry.key === page)) onPageChange(visiblePages[0].key);
+  }, [page, visiblePages]);
 
   const refreshHistory = async () => {
     setHistoryLoading(true);
     try {
       setHistory(await api<HistoryResponse>("/api/history"));
-    } catch (error) {
-      setHistoryError(
-        error instanceof Error ? error.message : "Unable to load history",
-      );
-      toast.error("Unable to load history");
+    } catch {
+      toast.error("Unable to refresh analytics");
     } finally {
       setHistoryLoading(false);
     }
   };
-  useEffect(() => {
-    void refreshHistory();
-  }, []);
-  useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        setConfigState(await api<ConfigResponse>("/api/config"));
-      } catch {
-        setConfigState(null);
-      }
-    };
-    void loadConfig();
-  }, []);
 
-  const filteredAudits = useMemo(
-    () =>
-      history.audits.filter((row) => {
-        const matchesSearch =
-          !search ||
-          [row.fileId, row.message, row.step, ...(row.parcelIds ?? [])].some(
-            (value) => value.toLowerCase().includes(search.toLowerCase()),
-          );
-        return (
-          matchesSearch &&
-          row.source !== "config" &&
-          (sourceFilter === "all" || row.source === sourceFilter)
-        );
-      }),
-    [history.audits, search, sourceFilter],
-  );
-
-  const parseWorker = () =>
-    new Worker(new URL("./workers/batch-parser.worker.ts", import.meta.url), {
-      type: "module",
-    });
-  const copyAndToast = async (text: string) => {
-    await copyText(text);
-    toast.success("Copied to clipboard");
+  const refreshConfig = async () => {
+    try {
+      setConfigState(await api<ConfigResponse>("/api/config"));
+    } catch {
+      setConfigState(null);
+    }
   };
 
+  useEffect(() => {
+    void refreshHistory();
+    void refreshConfig();
+  }, []);
+
+  const approvalRules = configState?.approvalConfig?.rules ?? [];
+  const routingRules = configState?.routingConfig?.rules ?? [];
+  const selectedSingle = history.singles.find((record) => {
+    const result = record.results as RoutingResult;
+    return result.parcelId.toLowerCase() === selectedParcelId.toLowerCase();
+  });
+  const selectedBatch = history.batches.find((record) => {
+    const batchId = record.batchId ?? "";
+    const results = Array.isArray(record.results) ? record.results : [];
+    return (
+      batchId.toLowerCase() === selectedBatchId.toLowerCase() ||
+      results.some((result) => result.parcelId.toLowerCase() === selectedBatchId.toLowerCase())
+    );
+  });
+  const batchResultPageCount = Math.max(1, Math.ceil((batchOutcome?.results.length ?? 0) / pageSize));
+  const batchResultSlice = (batchOutcome?.results ?? []).slice(
+    (batchUploadPage - 1) * pageSize,
+    batchUploadPage * pageSize,
+  );
+  const analyticsBatchResults = selectedBatch && Array.isArray(selectedBatch.results) ? selectedBatch.results : [];
+  const analyticsBatchPageCount = Math.max(1, Math.ceil(analyticsBatchResults.length / pageSize));
+  const analyticsBatchSlice = analyticsBatchResults.slice(
+    (analyticsBatchPage - 1) * pageSize,
+    analyticsBatchPage * pageSize,
+  );
+  const groupedIssues = groupIssues(failedRows);
+  const issuePageCount = Math.max(1, Math.ceil(groupedIssues.length / issuePageSize));
+  const issueGroupsSlice = groupedIssues.slice(
+    (batchIssuePage - 1) * issuePageSize,
+    batchIssuePage * issuePageSize,
+  );
+
   const validateSingle = async () => {
-    const response = await fetch("/api/upload/validate/single", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(JSON.parse(singleText)),
-    });
-    const data = await response.json();
-    if (!response.ok)
-      throw new Error(data?.error ?? "Single validation failed");
-    toast.success("Single JSON is valid");
+    try {
+      const parsed = JSON.parse(singleText) as Record<string, unknown>;
+      const report = await api<ValidationReport>("/api/upload/validate/single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      setSingleValidated(report.valid);
+      setSingleOutcome(null);
+      if (report.valid) {
+        setFailedRows([]);
+        setFailedSection(null);
+        toast.success("Single parcel is valid");
+      } else {
+        setFailedRows(report.issues);
+        setFailedSection("single");
+        toast.error("Single parcel needs changes");
+      }
+    } catch (error) {
+      setFailedRows([
+        {
+          rowNo: 1,
+          field: detectLikelyJsonField(singleText),
+          reason: formatSingleJsonParseReason(singleText, error),
+        },
+      ]);
+      setFailedSection("single");
+      setSingleValidated(false);
+      toast.error("Single parcel validation failed");
+    }
   };
 
   const routeSingle = async () => {
-    const result = await api<{
-      fileId: string;
-      result: { parcelId: string; route: string; approvals: string[] };
-    }>("/api/upload/single", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(JSON.parse(singleText)),
-    });
-    setStatus(
-      `Single parcel routed: ${result.result.parcelId} -> ${result.result.route}`,
-    );
-    toast.success(`Single parcel routed to ${result.result.route}`);
-    await refreshHistory();
+    try {
+      const parsed = JSON.parse(singleText) as Record<string, unknown>;
+      const outcome = await api<SingleRouteOutcome>("/api/upload/single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...parsed, importedBy: profile.username }),
+      });
+      setSingleOutcome(outcome);
+      setSingleLocked(true);
+      setFailedRows([]);
+      setFailedSection(null);
+      toast.success("Single parcel routed");
+      await refreshHistory();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Single routing failed");
+    }
   };
 
   const validateBatch = async () => {
-    if (!batchFile) return toast.error("Choose a batch file first");
+    if (!batchFile) {
+      toast.error("Choose a batch file first");
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("batchFile", batchFile, batchFile.name);
+      const report = await api<ValidationReport>("/api/upload/validate/batch", {
+        method: "POST",
+        body: formData,
+      });
+      setBatchValidated(report.valid);
+      setBatchOutcome(null);
+      setBatchIssuePage(1);
+      if (report.valid) {
+        setFailedRows([]);
+        setFailedSection(null);
+        toast.success("Batch file is valid");
+      } else {
+        setFailedRows(report.issues);
+        setFailedSection("batch");
+        toast.error("Batch file needs changes");
+      }
+    } catch (error) {
+      setFailedRows([{ rowNo: 1, field: "file", reason: error instanceof Error ? error.message : "Invalid batch file" }]);
+      setFailedSection("batch");
+      setBatchValidated(false);
+      toast.error("Batch validation failed");
+    }
+  };
+
+  const routeBatch = async () => {
+    if (!batchFile) {
+      toast.error("Choose a batch file first");
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("batchFile", batchFile, batchFile.name);
+      formData.append("importedBy", profile.username);
+      const outcome = await api<BatchRouteOutcome>("/api/upload/batch", {
+        method: "POST",
+        body: formData,
+      });
+      setBatchOutcome(outcome);
+      setBatchLocked(true);
+      setBatchUploadPage(1);
+      setFailedRows([]);
+      setFailedSection(null);
+      toast.success("Batch routed");
+      await refreshHistory();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Batch routing failed");
+    }
+  };
+
+  const resetSingle = () => {
+    setSingleValidated(false);
+    setSingleOutcome(null);
+    setSingleLocked(false);
+    if (failedSection === "single") {
+      setFailedRows([]);
+      setFailedSection(null);
+    }
+  };
+
+  const resetBatch = () => {
+    setBatchValidated(false);
+    setBatchOutcome(null);
+    setBatchLocked(false);
+    setBatchFile(null);
+    setBatchUploadPage(1);
+    setBatchIssuePage(1);
+    if (failedSection === "batch") {
+      setFailedRows([]);
+      setFailedSection(null);
+    }
+    if (batchFileInputRef.current) batchFileInputRef.current.value = "";
+  };
+
+  const searchSingle = () => {
+    setSingleSearchLoading(true);
+    setSelectedParcelId(parcelSearchInput.trim());
+    setSingleSearchLoading(false);
+  };
+
+  const searchBatch = () => {
+    setBatchSearchLoading(true);
+    setSelectedBatchId(batchSearchInput.trim());
+    setAnalyticsBatchPage(1);
+    setBatchSearchLoading(false);
+  };
+
+  const copyAndToast = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    toast.success("Copied to clipboard");
+  };
+
+  const closeConfigModal = () => {
+    setConfigModal(null);
+    setConfigModalText("");
+    setModalMessage(null);
+    setConfigModalIssues([]);
+    setConfigModalValidated(false);
+    if (failedSection === "config") {
+      setFailedRows([]);
+      setFailedSection(null);
+    }
+  };
+
+  const submitConfig = async (section: "approval" | "route", mode: "validate" | "apply", rules: ConfigRule[]) => {
+    const endpoint = `/api/config/${section === "approval" ? "approval" : "routing"}/${mode}`;
     const formData = new FormData();
-    formData.append("batchFile", batchFile, batchFile.name);
-    const response = await fetch("/api/upload/validate/batch", {
+    formData.append("configFile", new File([JSON.stringify({ rules }, null, 2)], "config.json", { type: "application/json" }));
+    if (mode === "apply") formData.append("modifiedBy", profile.username);
+    const report = await api<{ valid?: boolean; issues?: ValidationIssue[]; applied?: boolean; checksum?: string }>(endpoint, {
       method: "POST",
       body: formData,
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data?.error ?? "Batch validation failed");
-    toast.success("Batch file is valid");
+
+    if (report.issues?.length) {
+      setFailedRows(report.issues);
+      setFailedSection("config");
+      setConfigModalIssues(report.issues);
+      setModalMessage(null);
+      setConfigModalValidated(false);
+      return false;
+    }
+
+    if (mode === "apply") {
+      toast.success("Config applied");
+      closeConfigModal();
+      await refreshConfig();
+      await refreshHistory();
+    } else {
+      setModalMessage("Rule is valid");
+      setConfigModalValidated(true);
+      toast.success("Config is valid");
+    }
+    setFailedRows([]);
+    setFailedSection(null);
+    setConfigModalIssues([]);
+    return true;
   };
 
-  const routeBatchFile = async () => {
-    if (!batchFile) return toast.error("Choose a batch file first");
-    const text = await batchFile.text();
-    const payload = await new Promise<{
-      parcels: Array<Record<string, unknown>>;
-    }>((resolve, reject) => {
-      const worker = parseWorker();
-      worker.onmessage = (
-        event: MessageEvent<{
-          ok: boolean;
-          payload?: { parcels: Array<Record<string, unknown>> };
-          error?: string;
-        }>,
-      ) => {
-        if (event.data.ok && event.data.payload) resolve(event.data.payload);
-        else reject(new Error(event.data.error ?? "Invalid batch file"));
-        worker.terminate();
-      };
-      worker.onerror = () => {
-        reject(new Error("Batch parser worker failed"));
-        worker.terminate();
-      };
-      worker.postMessage({ text });
-    });
-    const formData = new FormData();
-    formData.append(
-      "batchFile",
-      new Blob([JSON.stringify(payload)], { type: "application/json" }),
-      batchFile.name,
+  const openConfigModal = (section: "approval" | "route", mode: "new" | "edit", index?: number) => {
+    const rules = section === "approval" ? approvalRules : routingRules;
+    const selected = typeof index === "number" ? stripMetadata(rules[index]) : null;
+    setConfigModal({ section, mode, index });
+    setConfigModalText(
+      selected
+        ? JSON.stringify(selected, null, 2)
+        : section === "approval"
+          ? defaultApprovalRule
+          : defaultRoutingRule,
     );
-    const response = await fetch("/api/upload/batch", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data?.error ?? "Batch upload failed");
-    setStatus(`Batch processed: ${data.fileId}`);
-    toast.success(`Batch uploaded as ${data.fileId}`);
-    await refreshHistory();
+    setModalMessage(null);
+    setConfigModalIssues([]);
+    setConfigModalValidated(false);
+    if (failedSection === "config") {
+      setFailedRows([]);
+      setFailedSection(null);
+    }
   };
 
-  const uploadConfig = async (
-    endpoint: "/api/config/validate" | "/api/config/apply",
-  ) => {
-    const formData = new FormData();
-    formData.append(
-      "configFile",
-      new File([configText], "config.json", { type: "application/json" }),
+  const applyConfigModal = async (mode: "validate" | "apply") => {
+    if (!configModal) return;
+    try {
+      const parsed = JSON.parse(configModalText) as ConfigRule;
+      const currentRules = configModal.section === "approval" ? approvalRules : routingRules;
+      const businessRules = currentRules.map((rule) => stripMetadata(rule));
+      const nextRules =
+        configModal.mode === "edit" && typeof configModal.index === "number"
+          ? businessRules.map((rule, index) => (index === configModal.index ? parsed : rule))
+          : [...businessRules, parsed];
+      if (mode === "apply") {
+        const valid = await submitConfig(configModal.section, "validate", nextRules);
+        if (!valid) return;
+      }
+      await submitConfig(configModal.section, mode, nextRules);
+    } catch (error) {
+      const issues = [{ rowNo: 1, field: "json", reason: error instanceof Error ? error.message : "Invalid input" }];
+      setFailedRows(issues);
+      setConfigModalIssues(issues);
+      setFailedSection("config");
+      setModalMessage(null);
+      setConfigModalValidated(false);
+    }
+  };
+
+  const seedData = async (action: "all" | "config") => {
+    try {
+      await api("/api/seed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      toast.success("Backend seeded");
+      await refreshHistory();
+      await refreshConfig();
+    } finally {
+      setSeedConfirm(null);
+    }
+  };
+
+  const promptSeedConfirm = (action: "all" | "config") => {
+    setSeedConfirm(
+      action === "all"
+        ? {
+            action,
+            title: "Reset Parcel Data?",
+            message: "This will wipe the current single parcel and batch lowdb records and replace them with seeded demo data.",
+            confirmLabel: "Reset parcel and batch data",
+          }
+        : {
+            action,
+            title: "Reset Config Data?",
+            message: "This will wipe the current approval and routing config records and replace them with the seeded configuration.",
+            confirmLabel: "Reset config data",
+          },
     );
-    const response = await fetch(endpoint, { method: "POST", body: formData });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data?.error ?? "Config request failed");
-    toast.success(
-      endpoint.endsWith("validate")
-        ? "Config validated"
-        : `Config applied version ${data.version}`,
-    );
-    await refreshHistory();
-    setConfigState(await api<ConfigResponse>("/api/config"));
-  };
-
-  const seedData = async () => {
-    await api("/api/seed", { method: "POST" });
-    toast.success("Backend seeded");
-    await refreshHistory();
-    setConfigState(await api<ConfigResponse>("/api/config"));
-  };
-
-  const runTrace = async (identifier = traceId) => {
-    const data = await api(
-      `/api/history/trace/${encodeURIComponent(identifier)}`,
-    );
-    setTraceData(data);
-    toast.success("Trace loaded");
-  };
-
-  const openConfigDetails = async () => {
-    const data = await api("/api/config");
-    setModalData({ title: "Config database", data });
   };
 
   return (
-    <div
-      className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:px-8"
-      style={{
-        gridTemplateColumns: menuOpen
-          ? "280px minmax(0, 1fr)"
-          : "88px minmax(0, 1fr)",
-      }}
-    >
-      <aside className="rounded-3xl border border-white/10 bg-slate-950/90 p-4 transition-all">
-        <div className="flex items-center justify-between gap-3">
-          <div className={menuOpen ? "block" : "hidden"}>
-            <p className="text-xs uppercase tracking-[0.4em] text-emerald-300">
-              Dashboard
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            onClick={() => setMenuOpen((value) => !value)}
-          >
-            <Menu className="h-4 w-4" />
-          </Button>
-        </div>
-        <nav className="mt-5 flex flex-col gap-2">
-          {menuItems.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setPage(key)}
-              className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm transition ${page === key ? "bg-emerald-400/15 text-emerald-300" : "text-slate-200 hover:bg-white/5"}`}
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+      <DashboardNav profile={profile} />
+
+      {page === "single" && (
+        <Card className="space-y-3.5">
+          <SectionTitle title="Import Single" text="Paste one parcel JSON body, validate it, then route it." />
+          <textarea
+            value={singleText}
+            onChange={(event) => {
+              setSingleText(event.target.value);
+              setSingleOutcome(null);
+              setSingleValidated(false);
+              setSingleLocked(false);
+            }}
+            className="mt-4 min-h-64 w-full rounded-[1.4rem] border border-white/10 bg-slate-950/70 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
+          />
+          <div className="mt-3 flex flex-wrap gap-3">
+            <Button variant="secondary" onClick={() => void validateSingle()}>
+              <CheckCircle2 className="h-4 w-4" />
+              <span className="ml-2">Validate</span>
+            </Button>
+            <Button
+              onClick={() => void routeSingle()}
+              disabled={singleLocked || !singleValidated || (failedSection === "single" && failedRows.length > 0)}
             >
-              <Icon className="h-4 w-4" />
-              <span className={menuOpen ? "inline" : "hidden"}>{label}</span>
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      <section className="space-y-6">
-        <header className="flex items-center justify-between gap-4 rounded-3xl border border-white/10 bg-slate-950/70 px-4 py-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
-              Hello
-            </p>
-            <h1 className="text-lg font-semibold text-white">
-              Welcome back, {profile.name}
-            </h1>
+              <FileUp className="h-4 w-4" />
+              <span className="ml-2">Route Single</span>
+            </Button>
+            {(singleOutcome || (failedSection === "single" && failedRows.length > 0) || singleValidated) && (
+              <TryNewButton onClick={resetSingle} />
+            )}
           </div>
-        </header>
-
-        {status && (
-          <p className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-300">
-            {status}
-          </p>
-        )}
-
-        {page === "single" && (
-          <Card>
-            <h2 className="text-2xl font-semibold text-white">Import Single</h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Paste a single parcel JSON body, validate it through the backend,
-              then route it.
-            </p>
-            <label className="mt-4 mb-2 block text-sm text-slate-200">
-              Single parcel JSON
-            </label>
-            <textarea
-              value={singleText}
-              onChange={(event) => setSingleText(event.target.value)}
-              className="min-h-72 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
+          {failedSection === "single" && failedRows.length > 0 && (
+            <ValidationTable issues={failedRows} pagedGroups={groupedIssues} />
+          )}
+          {singleOutcome && (
+            <RouteResultsTable
+              rows={[singleOutcome.result]}
+              batchId={null}
+              importedBy={singleOutcome.importedBy}
+              createdAt={singleOutcome.createdAt}
+              copyAndToast={copyAndToast}
             />
-            <div className="mt-3 flex flex-wrap gap-3">
-              <Button variant="secondary" onClick={() => void validateSingle()}>
-                Validate
-              </Button>
-              <Button onClick={() => void routeSingle()}>Route Single</Button>
-            </div>
-          </Card>
-        )}
+          )}
+        </Card>
+      )}
 
-        {page === "batch" && (
-          <Card>
-            <h2 className="text-2xl font-semibold text-white">Import Batch</h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Select a JSON file containing parcels, validate it, then apply it.
-            </p>
-            <div className="mt-4 space-y-3">
-              <input
-                type="file"
-                accept="application/json"
-                className="block w-full text-sm text-slate-300 file:mr-4 file:rounded-full file:border-0 file:bg-emerald-500 file:px-4 file:py-2 file:font-medium file:text-slate-950 hover:file:bg-emerald-400"
-                onChange={(event) => {
-                  const file = event.target.files?.[0] ?? null;
-                  setBatchFile(file);
-                  setBatchFileName(file?.name ?? null);
-                }}
-              />
-              <p className="text-sm text-slate-300">
-                Selected file: {batchFileName ?? "none"}
-              </p>
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  variant="secondary"
-                  onClick={() => void validateBatch()}
-                  disabled={!batchFile}
-                >
-                  Validate
-                </Button>
-                <Button
-                  onClick={() => void routeBatchFile()}
-                  disabled={!batchFile}
-                >
-                  Apply
-                </Button>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {page === "analytics" && (
-          <Card>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold text-white">Analytics</h2>
-                <p className="mt-2 text-sm text-slate-300">
-                  Search, filter, and trace audit rows.
-                </p>
-              </div>
-              <Button variant="secondary" onClick={() => void refreshHistory()}>
-                Refresh
-              </Button>
-            </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search parcel, file, step, or message"
-                className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
-              />
-              <select
-                value={sourceFilter}
-                onChange={(event) =>
-                  setSourceFilter(event.target.value as typeof sourceFilter)
+      {page === "batch" && (
+        <Card className="space-y-3.5">
+          <SectionTitle title="Import Batch" text="Select a JSON file containing parcels, validate it, then apply it." />
+          <div className="mt-4 space-y-2.5">
+            <input
+              ref={batchFileInputRef}
+              type="file"
+              accept="application/json"
+              className="block w-full text-sm text-slate-300 file:mr-4 file:rounded-full file:border-0 file:bg-emerald-500 file:px-4 file:py-2 file:font-medium file:text-slate-950 hover:file:bg-emerald-400"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setBatchFile(file);
+                setBatchValidated(false);
+                setBatchOutcome(null);
+                setBatchLocked(false);
+                setBatchUploadPage(1);
+                if (failedSection === "batch") {
+                  setFailedRows([]);
+                  setFailedSection(null);
                 }
-                className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 pr-10 text-sm outline-none focus:border-emerald-400"
-              >
-                <option value="all">All sources</option>
-                <option value="single">Single</option>
-                <option value="batch">Batch</option>
-                <option value="config">Config</option>
-              </select>
-            </div>
-            <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-white/5 text-slate-300">
-                  <tr>
-                    <th className="px-4 py-3">Parcel ID</th>
-                    <th className="px-4 py-3">File ID</th>
-                    <th className="px-4 py-3">Source</th>
-                    <th className="px-4 py-3">Step</th>
-                    <th className="px-4 py-3">Open</th>
-                    <th className="px-4 py-3">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAudits.map((row) => (
-                    <tr key={row.id} className="border-t border-white/5">
-                      <td className="px-4 py-3 font-mono text-xs text-emerald-300">
-                        <button
-                          type="button"
-                          className="group inline-flex items-center gap-2"
-                          title="Copy parcel ID"
-                          onClick={async () => {
-                            const parcelId = row.parcelIds?.[0];
-                            if (!parcelId) return;
-                            await copyAndToast(parcelId);
-                          }}
-                        >
-                          <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 font-medium text-emerald-200 underline decoration-2 decoration-emerald-300 underline-offset-4 transition group-hover:bg-emerald-400/20 group-hover:text-white">
-                            {row.parcelIds?.[0] ?? "-"}
-                          </span>
-                          <Copy className="h-3.5 w-3.5 opacity-0 transition group-hover:opacity-100" />
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-300">
-                        {row.fileId}
-                      </td>
-                      <td className="px-4 py-3 text-slate-200">{row.source}</td>
-                      <td className="px-4 py-3 text-slate-200">{row.step}</td>
-                      <td className="px-4 py-3">
-                        {row.source === "config" && row.details ? (
-                          <Button variant="ghost" onClick={openConfigDetails}>
-                            <Eye className="h-4 w-4" />
-                            <span className="ml-2">Details</span>
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="secondary"
-                            className="border border-emerald-400/30 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
-                            onClick={async () => {
-                              setPage("trace");
-                              setTraceId(row.parcelIds?.[0] ?? row.fileId);
-                              await runTrace(row.parcelIds?.[0] ?? row.fileId);
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                            <span className="ml-2">Trace</span>
-                          </Button>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-slate-400">
-                        {formatTime(row.createdAt)}
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredAudits.length === 0 && (
-                    <tr>
-                      <td className="px-4 py-6 text-slate-400" colSpan={6}>
-                        {historyLoading
-                          ? "Loading..."
-                          : (historyError ?? "No rows match your filters.")}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
-        {page === "analytics" && configState && (
-          <Card>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold text-white">
-                  Config Analytics
-                </h2>
-                <p className="mt-2 text-sm text-slate-300">
-                  Configuration changes are tracked separately with their own
-                  change IDs.
-                </p>
-              </div>
-              <Button variant="secondary" onClick={() => void seedData()}>
-                Seed data
-              </Button>
-            </div>
-            <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-white/5 text-slate-300">
-                  <tr>
-                    <th className="px-4 py-3">Change ID</th>
-                    <th className="px-4 py-3">Version</th>
-                    <th className="px-4 py-3">Checksum</th>
-                    <th className="px-4 py-3">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {configState.versions.map((version) => (
-                    <tr
-                      key={version.changeId}
-                      className="border-t border-white/5"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs text-emerald-300">
-                        {version.changeId}
-                      </td>
-                      <td className="px-4 py-3 text-slate-200">
-                        {version.version}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-300">
-                        {version.checksum}
-                      </td>
-                      <td className="px-4 py-3 text-slate-400">
-                        {formatTime(version.createdAt)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
-        {page === "rules" && profile.role === "admin" && (
-          <Card>
-            <h2 className="text-2xl font-semibold text-white">
-              Config Manager
-            </h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Upload updated routing rules as JSON. Validate first, then apply.
-            </p>
-            <textarea
-              value={configText}
-              onChange={(event) => setConfigText(event.target.value)}
-              className="mt-4 min-h-72 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
+              }}
             />
-            <div className="mt-3 flex gap-3">
-              <Button onClick={() => void uploadConfig("/api/config/validate")}>
-                Validate Config
+            <div className="flex flex-wrap gap-3">
+              <Button variant="secondary" onClick={() => void validateBatch()} disabled={!batchFile}>
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="ml-2">Validate</span>
               </Button>
               <Button
-                variant="secondary"
-                onClick={() => void uploadConfig("/api/config/apply")}
+                onClick={() => void routeBatch()}
+                disabled={!batchFile || batchLocked || !batchValidated || (failedSection === "batch" && failedRows.length > 0)}
               >
-                Apply Config
+                <FileUp className="h-4 w-4" />
+                <span className="ml-2">Apply</span>
               </Button>
+              {(batchFile || batchOutcome || (failedSection === "batch" && failedRows.length > 0) || batchValidated) && (
+                <TryNewButton onClick={resetBatch} />
+              )}
             </div>
-          </Card>
-        )}
-
-        {page === "trace" && (
-          <Card>
-            <h2 className="text-2xl font-semibold text-white">Trace</h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Trace a parcel or file ID from analytics or directly from here.
-            </p>
-            <div className="mt-4 flex gap-3">
-              <input
-                value={traceId}
-                onChange={(event) => setTraceId(event.target.value)}
-                placeholder="Parcel ID or file ID"
-                className="flex-1 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
+          </div>
+          {failedSection === "batch" && failedRows.length > 0 && (
+            <>
+              <ValidationTable issues={failedRows} pagedGroups={issueGroupsSlice} />
+              {groupedIssues.length > issuePageSize && (
+                <Pager
+                  page={batchIssuePage}
+                  pageCount={issuePageCount}
+                  onPrev={() => setBatchIssuePage((current) => Math.max(1, current - 1))}
+                  onNext={() => setBatchIssuePage((current) => Math.min(issuePageCount, current + 1))}
+                />
+              )}
+            </>
+          )}
+          {batchOutcome && (
+            <>
+              <RouteResultsTable
+                rows={batchResultSlice}
+                batchId={batchOutcome.batchId}
+                importedBy={batchOutcome.importedBy}
+                createdAt={batchOutcome.createdAt}
+                copyAndToast={copyAndToast}
               />
-              <Button onClick={() => void runTrace()}>Trace</Button>
-            </div>
-            <div className="mt-4 flex gap-3">
-              <Button
-                variant="secondary"
-                onClick={async () => {
-                  if (!traceData) return;
-                  await copyAndToast(JSON.stringify(traceData, null, 2));
-                }}
-                disabled={!traceData}
-              >
-                <Copy className="h-4 w-4" />
-                <span className="ml-2">Copy data</span>
+              {(batchOutcome.results.length > pageSize) && (
+                <Pager
+                  page={batchUploadPage}
+                  pageCount={batchResultPageCount}
+                  onPrev={() => setBatchUploadPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setBatchUploadPage((current) => Math.min(batchResultPageCount, current + 1))}
+                />
+              )}
+            </>
+          )}
+        </Card>
+      )}
+
+      {page === "analytics" && (
+        <Card className="space-y-4">
+          <SectionTitle title="Analytics" text="Search by parcel id or batch id to trace routed records." />
+          {historyLoading && <p className="mt-4 text-sm text-slate-400">Loading analytics...</p>}
+          <div className="mt-5 space-y-6">
+            <SearchPanel
+              title="Single Parcel Table View"
+              label="Search parcel id"
+              value={parcelSearchInput}
+              setValue={setParcelSearchInput}
+              loading={singleSearchLoading}
+              onSearch={searchSingle}
+              onClear={() => {
+                setParcelSearchInput("");
+                setSelectedParcelId("");
+              }}
+            >
+              <RouteResultsTable
+                rows={selectedSingle ? [selectedSingle.results as RoutingResult] : []}
+                batchId={null}
+                importedBy={selectedSingle?.importedBy}
+                createdAt={selectedSingle?.createdAt}
+                copyAndToast={copyAndToast}
+                compact
+                emptyText={selectedParcelId ? "No parcel found" : "Search a parcel ID to populate this table"}
+              />
+            </SearchPanel>
+            <SearchPanel
+              title="Batch Table View"
+              label="Search batch id"
+              value={batchSearchInput}
+              setValue={setBatchSearchInput}
+              loading={batchSearchLoading}
+              onSearch={searchBatch}
+              onClear={() => {
+                setBatchSearchInput("");
+                setSelectedBatchId("");
+                setAnalyticsBatchPage(1);
+              }}
+            >
+              <RouteResultsTable
+                rows={selectedBatch ? analyticsBatchSlice : []}
+                batchId={selectedBatch?.batchId}
+                importedBy={selectedBatch?.importedBy}
+                createdAt={selectedBatch?.createdAt}
+                copyAndToast={copyAndToast}
+                compact
+                emptyText={selectedBatchId ? "No batch found" : "Search a batch ID to populate this table"}
+              />
+              {selectedBatch && analyticsBatchResults.length > pageSize && (
+                <Pager
+                  page={analyticsBatchPage}
+                  pageCount={analyticsBatchPageCount}
+                  onPrev={() => setAnalyticsBatchPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setAnalyticsBatchPage((current) => Math.min(analyticsBatchPageCount, current + 1))}
+                />
+              )}
+            </SearchPanel>
+          </div>
+        </Card>
+      )}
+
+      {page === "rules" && (
+        <Card className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <SectionTitle title="Config Manager" text="Manage approval and routing rules." />
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => openConfigModal("approval", "new")}>
+                <Plus className="h-4 w-4" />
+                <span className="ml-2">New Approval Rule</span>
+              </Button>
+              <Button onClick={() => openConfigModal("route", "new")}>
+                <Plus className="h-4 w-4" />
+                <span className="ml-2">New Routing Rule</span>
               </Button>
             </div>
-            <pre className="mt-4 max-h-[28rem] overflow-auto rounded-2xl border border-white/10 bg-slate-950 p-4 text-xs leading-6 text-slate-200">
-              {traceData
-                ? JSON.stringify(traceData, null, 2)
-                : "Trace result will appear here."}
-            </pre>
-          </Card>
-        )}
+          </div>
+          <ConfigTable
+            title="Approval Table View"
+            rules={approvalRules}
+            section="approval"
+            onEdit={(index) => openConfigModal("approval", "edit", index)}
+          />
+          <ConfigTable
+            title="Routing Table View"
+            rules={routingRules}
+            section="route"
+            onEdit={(index) => openConfigModal("route", "edit", index)}
+          />
+          {failedSection === "config" && failedRows.length > 0 && (
+            <ConfigValidationTable issues={failedRows} />
+          )}
+        </Card>
+      )}
 
-        {page === "seed" && (
-          <Card>
-            <h2 className="text-2xl font-semibold text-white">Seed Data</h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Reset the backend database and reseed auth, config, parcel, and
-              batch data.
-            </p>
-            <div className="mt-4 flex gap-3">
-              <Button onClick={() => void seedData()}>Seed backend data</Button>
-            </div>
-          </Card>
-        )}
-      </section>
+      {page === "seed" && (
+        <Card className="space-y-4">
+          <SectionTitle title="Seed Data" text="Reset demo data for operators and admins." />
+          <div className="mt-4 flex flex-wrap gap-3">
+            {profile.role === "operator" && (
+              <Button variant="destructive" onClick={() => promptSeedConfirm("all")}>
+                Seed parcel and batch data
+              </Button>
+            )}
+            {profile.role === "admin" && (
+              <Button variant="destructive" onClick={() => promptSeedConfirm("config")}>
+                Seed config data
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
 
-      {modalData && (
+      {configModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
           <div className="w-full max-w-3xl rounded-3xl border border-white/10 bg-slate-950 p-5 shadow-2xl">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold text-white">
-                {modalData.title}
-              </h3>
-              <Button variant="ghost" onClick={() => setModalData(null)}>
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  {configModal.mode === "new" ? "New" : "Update"} {configModal.section === "approval" ? "Approval" : "Routing"} Rule
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">Supported operators: &gt;, &lt;, &gt;=, &lt;=, ==, is_true, is_false</p>
+              </div>
+              <Button variant="ghost" onClick={closeConfigModal}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
-            <pre className="mt-4 max-h-[60vh] overflow-auto rounded-2xl border border-white/10 bg-slate-900 p-4 text-xs leading-6 text-slate-200">
-              {JSON.stringify(modalData.data, null, 2)}
-            </pre>
-            <div className="mt-4 flex gap-3">
-              <Button
-                onClick={async () => {
-                  await copyAndToast(JSON.stringify(modalData.data, null, 2));
-                }}
-              >
-                <Copy className="h-4 w-4" />
-                <span className="ml-2">Copy data</span>
-              </Button>
-              <Button variant="secondary" onClick={() => setModalData(null)}>
-                Close
+            <textarea
+              value={configModalText}
+              onChange={(event) => {
+                setConfigModalText(event.target.value);
+                setModalMessage(null);
+                setConfigModalIssues([]);
+                setConfigModalValidated(false);
+                if (failedSection === "config") {
+                  setFailedRows([]);
+                  setFailedSection(null);
+                }
+              }}
+              className="mt-4 min-h-72 w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
+            />
+            {modalMessage && <p className="mt-3 text-sm text-emerald-300">{modalMessage}</p>}
+            {configModalIssues.length > 0 && (
+              <ConfigValidationTable issues={configModalIssues} />
+            )}
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button variant="secondary" onClick={() => void applyConfigModal("validate")}>Validate</Button>
+              <Button onClick={() => void applyConfigModal("apply")} disabled={!configModalValidated}>
+                {configModal.mode === "new" ? "Add" : "Update"}
               </Button>
             </div>
           </div>
         </div>
       )}
+
+      {seedConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+          <div className="w-full max-w-xl rounded-3xl border border-rose-400/30 bg-slate-950 p-5 shadow-2xl shadow-rose-950/30">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.35em] text-rose-300">Confirm Reset</p>
+                <h3 className="mt-2 text-lg font-semibold text-white">{seedConfirm.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-300">{seedConfirm.message}</p>
+              </div>
+              <Button variant="ghost" onClick={() => setSeedConfirm(null)} aria-label="Close confirmation">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <Button variant="secondary" onClick={() => setSeedConfirm(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => void seedData(seedConfirm.action)}>
+                {seedConfirm.confirmLabel}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function DashboardNav({
+  profile,
+}: {
+  profile: UserProfile;
+}) {
+  return (
+    <section className="rounded-[1.75rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-5 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.2)] backdrop-blur-xl">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Dashboard</p>
+          <h1 className="mt-1 text-2xl font-semibold text-white">Welcome back, {profile.username}</h1>
+        </div>
+        <Badge tone={profile.role === "admin" ? "amber" : "sky"}>
+          {profile.role}
+        </Badge>
+      </div>
+    </section>
+  );
+}
+
+function SectionTitle({ title, text }: { title: string; text: string }) {
+  return (
+    <div>
+      <h2 className="text-[1.7rem] font-semibold tracking-tight text-white">{title}</h2>
+      <p className="mt-1.5 text-sm leading-6 text-slate-300">{text}</p>
     </div>
   );
 }
 
-function App() {
-  const [profile, setProfile] = useStoredProfile();
-  const [view, setView] = useState<View>(() =>
-    profile ? "dashboard" : "landing",
+function TryNewButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      type="button"
+      onClick={onClick}
+      className="bg-emerald-300 text-emerald-950 hover:bg-emerald-400"
+    >
+      Try New
+    </Button>
   );
-  useEffect(() => {
-    const handler = () => {
-      const hash = window.location.hash.replace("#", "") as View;
-      if (hash && ["landing", "login", "docs", "dashboard"].includes(hash))
-        setView(hash);
-    };
-    handler();
-    window.addEventListener("hashchange", handler);
-    return () => window.removeEventListener("hashchange", handler);
-  }, []);
+}
 
-  const go = (next: View) => {
-    setView(next);
-    window.location.hash = next;
-  };
+function RouteResultsTable({
+  rows,
+  batchId,
+  importedBy,
+  createdAt,
+  copyAndToast,
+  compact = false,
+  emptyText = "No records",
+}: {
+  rows: RoutingResult[];
+  batchId?: string | null;
+  importedBy?: string;
+  createdAt?: string;
+  copyAndToast: (text: string) => Promise<void>;
+  compact?: boolean;
+  emptyText?: string;
+}) {
+  return (
+    <div className="mt-5 overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-white/5 text-slate-300">
+          <tr>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Batch ID</th>
+            <th className="px-4 py-3">Parcel ID</th>
+            <th className="px-4 py-3">To Be Routed</th>
+            <th className="px-4 py-3">Routed To</th>
+            <th className="px-4 py-3">Approvals</th>
+            <th className="px-4 py-3">Imported By</th>
+            <th className="px-4 py-3">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr className="border-t border-white/5">
+              <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
+                {emptyText}
+              </td>
+            </tr>
+          )}
+          {rows.map((row) => (
+            <tr key={`${row.parcelId}-${row.route}-${compact ? "compact" : "full"}`} className="border-t border-white/5">
+              <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+              <td className="px-4 py-3">{batchId ? <CopyButton value={batchId} onCopy={copyAndToast} /> : <NaBadge />}</td>
+              <td className="px-4 py-3"><CopyButton value={row.parcelId} onCopy={copyAndToast} /></td>
+              <td className="px-4 py-3">{renderRouteValue(row.toBeRouted)}</td>
+              <td className="px-4 py-3">{renderRouteValue(row.routedTo)}</td>
+              <td className="px-4 py-3">{row.approvals.length ? row.approvals.map((approval) => <Badge key={approval} tone="amber">{approval}</Badge>) : <NaBadge />}</td>
+              <td className="px-4 py-3">{importedBy || <NaBadge />}</td>
+              <td className="px-4 py-3 text-slate-300">{formatTime(createdAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ValidationTable({
+  issues,
+  pagedGroups,
+  groupColumnLabel = "Parcel No",
+  groupBadgeLabel = "Parcel",
+}: {
+  issues: ValidationIssue[];
+  pagedGroups: Array<{ rowNo: number; issues: ValidationIssue[] }>;
+  groupColumnLabel?: string;
+  groupBadgeLabel?: string;
+}) {
+  return (
+    <div className="mt-5 overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-white/5 text-slate-300">
+          <tr>
+            <th className="w-[9rem] px-4 py-3">{groupColumnLabel}</th>
+            <th className="w-[14rem] px-4 py-3">Field</th>
+            <th className="px-4 py-3">Reason</th>
+            <th className="w-[9rem] px-4 py-3">Issue Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {issues.length === 0 && (
+            <tr>
+              <td colSpan={4} className="px-4 py-6 text-center text-slate-400">No validation issues</td>
+            </tr>
+          )}
+          {pagedGroups.map((group, groupIndex) => {
+            const groupTone = groupIndex % 2 === 0 ? "amber" : "emerald";
+            const rowClass = groupTone === "amber" ? "bg-amber-400/10" : "bg-emerald-400/10";
+            return group.issues.map((issue, issueIndex) => (
+              <tr key={`${group.rowNo}-${issue.field}-${issue.reason}-${issueIndex}`} className={`border-t border-white/5 ${rowClass}`}>
+                {issueIndex === 0 && (
+                  <td rowSpan={group.issues.length} className="px-4 py-3 align-top">
+                    <Badge tone={groupTone}>{groupBadgeLabel} {group.rowNo}</Badge>
+                  </td>
+                )}
+                <td className="px-4 py-3 align-top">
+                  <Badge tone={groupTone}>{cleanIssueField(issue.field)}</Badge>
+                </td>
+                <td className="px-4 py-3 text-slate-200">
+                  <span className="block max-w-[34rem] whitespace-normal break-words leading-6">{issue.reason}</span>
+                </td>
+                {issueIndex === 0 && (
+                  <td rowSpan={group.issues.length} className="px-4 py-3 align-top">
+                    <Badge tone={groupTone}>{group.issues.length} {group.issues.length === 1 ? "issue" : "issues"}</Badge>
+                  </td>
+                )}
+              </tr>
+            ));
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ConfigValidationTable({ issues }: { issues: ValidationIssue[] }) {
+  return (
+    <div className="mt-5 overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-white/5 text-slate-300">
+          <tr>
+            <th className="w-[16rem] px-4 py-3">Field</th>
+            <th className="px-4 py-3">Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {issues.length === 0 && (
+            <tr>
+              <td colSpan={2} className="px-4 py-6 text-center text-slate-400">No validation issues</td>
+            </tr>
+          )}
+          {issues.map((issue, index) => (
+            <tr key={`${issue.field}-${issue.reason}-${index}`} className="border-t border-white/5">
+              <td className="px-4 py-3 align-top">
+                <Badge tone="amber">{formatConfigIssueField(issue)}</Badge>
+              </td>
+              <td className="px-4 py-3 text-slate-200">
+                <span className="block whitespace-normal break-words leading-6">{issue.reason}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SearchPanel({
+  title,
+  label,
+  value,
+  setValue,
+  loading,
+  onSearch,
+  onClear,
+  children,
+}: {
+  title: string;
+  label: string;
+  value: string;
+  setValue: (value: string) => void;
+  loading: boolean;
+  onSearch: () => void;
+  onClear: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[1.5rem] border border-white/8 bg-slate-950/35 p-4">
+      <h3 className="mb-3 text-base font-semibold text-white sm:text-lg">{title}</h3>
+      <div className="flex flex-wrap gap-2">
+        <input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder={label}
+          className="min-w-0 flex-1 rounded-[1.15rem] border border-white/10 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-emerald-400"
+        />
+        <Button variant="secondary" onClick={onSearch} disabled={loading} aria-label="Search">
+          <Search className="h-4 w-4 text-emerald-300" />
+        </Button>
+        <Button variant="secondary" onClick={onClear} aria-label="Clear">
+          <Eraser className="h-4 w-4 text-rose-300" />
+        </Button>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ConfigTable({
+  title,
+  rules,
+  section,
+  onEdit,
+}: {
+  title: string;
+  rules: ConfigRule[];
+  section: "approval" | "route";
+  onEdit: (index: number) => void;
+}) {
+  return (
+    <section className="mt-7">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        <span className="text-sm text-slate-400">{rules.length === 1 ? "1 rule" : `${rules.length} rules`}</span>
+      </div>
+      <div className="overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-white/5 text-slate-300">
+            <tr>
+              {section === "approval" && <th className="px-4 py-3">S.No</th>}
+              {section === "route" && <th className="px-4 py-3">Priority</th>}
+              <th className="px-4 py-3">{section === "approval" ? "Approval" : "Department"}</th>
+              <th className="px-4 py-3">Condition</th>
+              <th className="px-4 py-3">Created By</th>
+              <th className="px-4 py-3">Last Modified By</th>
+              <th className="px-4 py-3">Time</th>
+              <th className="px-4 py-3">Edit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.map((rule, index) => (
+              <tr key={`${rule.type}-${index}`} className="border-t border-white/5">
+                {section === "approval" && <td className="px-4 py-3 text-slate-300">{index + 1}</td>}
+                {section === "route" && (
+                  <td className="px-4 py-3">{rule.type === "route" && rule.priority === Number.MAX_SAFE_INTEGER ? "∞" : rule.type === "route" ? rule.priority : <NaBadge />}</td>
+                )}
+                <td className="px-4 py-3">
+                  {rule.type === "approval" ? <Badge tone="amber">{rule.action.approval}</Badge> : <Badge tone="emerald">{rule.action.department}</Badge>}
+                </td>
+                <td className="px-4 py-3"><ConditionView condition={rule.when} /></td>
+                <td className="px-4 py-3">{rule.createdBy ?? <NaBadge />}</td>
+                <td className="px-4 py-3">{rule.lastModifiedBy ?? <NaBadge />}</td>
+                <td className="px-4 py-3 text-slate-300">{formatTime(rule.lastModifiedAt ?? rule.createdAt)}</td>
+                <td className="px-4 py-3">
+                  <Button variant="ghost" onClick={() => onEdit(index)} aria-label="Edit rule">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+            {rules.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">No rules</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ConditionView({ condition }: { condition: Condition }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <span className="rounded-full bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-200">{condition.field}</span>
+      <span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-200">{condition.operator}</span>
+      {"value" in condition && condition.value !== undefined && (
+        <span className="rounded-full bg-fuchsia-400/10 px-3 py-1 text-xs font-medium text-fuchsia-200">{String(condition.value)}</span>
+      )}
+    </span>
+  );
+}
+
+function Pager({
+  page,
+  pageCount,
+  onPrev,
+  onNext,
+}: {
+  page: number;
+  pageCount: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="mt-4 flex items-center justify-end gap-3 text-sm text-slate-300">
+      <span>Page {page} of {pageCount}</span>
+      <Button variant="secondary" onClick={onPrev} disabled={page <= 1}>Prev</Button>
+      <Button variant="secondary" onClick={onNext} disabled={page >= pageCount}>Next</Button>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status?: RouteStatus }) {
+  if (status === "approval pending") return <Badge tone="amber">approval pending</Badge>;
+  if (status === "defaulted") return <Badge tone="sky">defaulted</Badge>;
+  if (status === "errored") return <Badge tone="rose">errored</Badge>;
+  return <Badge tone="emerald">processed</Badge>;
+}
+
+function Badge({
+  tone,
+  children,
+}: {
+  tone: "amber" | "emerald" | "sky" | "rose";
+  children: React.ReactNode;
+}) {
+  const className = {
+    amber: "bg-amber-400/15 text-amber-200",
+    emerald: "bg-emerald-400/15 text-emerald-200",
+    sky: "bg-sky-400/15 text-sky-200",
+    rose: "bg-rose-400/15 text-rose-200",
+  }[tone];
+  return <span className={`mr-1 inline-flex rounded-full px-3 py-1 text-xs font-medium ${className}`}>{children}</span>;
+}
+
+function NaBadge() {
+  return <span className="inline-flex rounded-full bg-slate-500/20 px-3 py-1 text-xs font-medium text-slate-200">n/a</span>;
+}
+
+function CopyButton({
+  value,
+  onCopy,
+}: {
+  value: string;
+  onCopy: (value: string) => Promise<void>;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => void onCopy(value)}
+      className="group inline-flex items-center gap-2 font-mono text-xs text-emerald-300"
+    >
+      <span>{value}</span>
+      <Copy className="h-3.5 w-3.5 opacity-0 transition group-hover:opacity-100" />
+    </button>
+  );
+}
+
+function renderRouteValue(value?: string) {
+  if (!value || value === "n/a") return <NaBadge />;
+  return <Badge tone="sky">{value}</Badge>;
+}
+
+function groupIssues(issues: ValidationIssue[]) {
+  const groups = new Map<number, ValidationIssue[]>();
+  for (const issue of issues) {
+    const rowNo = issue.rowNo || 1;
+    groups.set(rowNo, [...(groups.get(rowNo) ?? []), issue]);
+  }
+  return [...groups.entries()].map(([rowNo, groupIssues]) => ({ rowNo, issues: groupIssues }));
+}
+
+function cleanIssueField(field: string) {
+  return field.replace(/^row\s+\d+\s+/i, "").replace(/^\d+\s+/, "");
+}
+
+function detectLikelyJsonField(source: string) {
+  const singleQuotedValueMatch = [...source.matchAll(/"([^"]+)"\s*:\s*'/g)].at(-1);
+  if (singleQuotedValueMatch?.[1]) return singleQuotedValueMatch[1];
+
+  const trailingKeyMatch = [...source.matchAll(/"([^"]+)"\s*:\s*$/gm)].at(-1);
+  if (trailingKeyMatch?.[1]) return trailingKeyMatch[1];
+
+  return "json";
+}
+
+function formatSingleJsonParseReason(source: string, error: unknown) {
+  if (/"[^"]+"\s*:\s*'/.test(source)) {
+    return "JSON values must use double quotes. Replace single-quoted values with valid JSON strings or numbers.";
+  }
+
+  if (/,\s*[}\]]/.test(source)) {
+    return "Remove the trailing comma before the closing bracket or brace.";
+  }
+
+  if (!source.trim().startsWith("{") || !source.trim().endsWith("}")) {
+    return "The single parcel input must be a valid JSON object wrapped in curly braces.";
+  }
+
+  return error instanceof Error ? "The single parcel input is not valid JSON." : "Invalid input.";
+}
+
+function formatConfigIssueField(issue: ValidationIssue) {
+  const normalizedField = cleanIssueField(issue.field);
+
+  if (normalizedField.includes("action.approval")) return "action.approval";
+  if (normalizedField.includes("action.department")) return "action.department";
+  if (normalizedField.includes("when.operator")) return "when.operator";
+
+  if (normalizedField === "rules") {
+    if (/^Approval\s+.+\s+is repeated within the uploaded config\.$/.test(issue.reason)) {
+      return "action.approval";
+    }
+    if (/^This editor accepts only\s+(approval|route)\s+rules\.$/.test(issue.reason)) {
+      return "type";
+    }
+  }
+
+  return normalizedField;
+}
+
+function stripMetadata(rule: ConfigRule): ConfigRule {
+  const { createdBy, createdAt, lastModifiedBy, lastModifiedAt, ...businessRule } = rule;
+  void createdBy;
+  void createdAt;
+  void lastModifiedBy;
+  void lastModifiedAt;
+  return businessRule as ConfigRule;
+}
+
+export default function App() {
+  const [view, setView] = useState<View>("landing");
+  const [profile, setProfile] = useStoredProfile();
+  const headerNavItems: DashboardNavItem[] =
+    view === "dashboard" && profile
+      ? profile.role === "admin"
+        ? [
+            { key: "analytics", label: "Analytics", icon: Search },
+            { key: "rules", label: "Config", icon: ShieldCheck },
+            { key: "seed", label: "Seed", icon: FileText },
+          ]
+        : [
+            { key: "single", label: "Single", icon: BadgeCheck },
+            { key: "batch", label: "Batch", icon: FileUp },
+            { key: "analytics", label: "Analytics", icon: Search },
+            { key: "seed", label: "Seed", icon: FileText },
+          ]
+      : [];
+  const [headerDashboardPage, setHeaderDashboardPage] = useState<DashboardPage>(
+    profile?.role === "admin" ? "analytics" : "single",
+  );
+
+  useEffect(() => {
+    if (!profile) return;
+    setHeaderDashboardPage(profile.role === "admin" ? "analytics" : "single");
+  }, [profile?.role]);
+
   const login = async (form: LoginForm, mode: AuthMode) => {
-    const endpoint =
-      mode === "login" ? "/api/auth/login" : "/api/auth/register";
-    const user = await api<UserProfile>(endpoint, {
+    const user = await api<UserProfile>(`/api/auth/${mode}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        mode === "login"
-          ? { email: form.email, password: form.password }
-          : form,
-      ),
+      body: JSON.stringify(form),
     });
     setProfile(user);
-    toast.success(mode === "login" ? "Logged in" : "Registered and logged in");
-    go("dashboard");
+    setView("dashboard");
+    toast.success(`Welcome, ${user.username}`);
   };
+
   const logout = () => {
     setProfile(null);
-    toast.success("Logged out");
-    go("login");
+    setView("landing");
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50">
-      <Toaster richColors position="bottom-center" closeButton />
+    <div className="min-h-screen bg-slate-950 text-slate-100">
       <SiteHeader
-        profile={profile}
-        onHome={() => go("landing")}
-        onLogin={() => go("login")}
-        onDocs={() => go("docs")}
-        onDashboard={() => go(profile ? "dashboard" : "login")}
+        profile={profile ? { name: profile.username, role: profile.role } : null}
+        onHome={() => setView("landing")}
+        onLogin={() => setView("login")}
+        onDocs={() => setView("docs")}
         onLogout={logout}
+        navItems={headerNavItems}
+        activeNavKey={view === "dashboard" ? headerDashboardPage : undefined}
+        onNavigate={(key) => {
+          setView("dashboard");
+          setHeaderDashboardPage(key as DashboardPage);
+        }}
       />
+      <Toaster richColors position="top-center" duration={3500} />
       {view === "landing" && (
         <LandingPage
           profile={profile}
-          onGoLogin={() => go("login")}
-          onGoDocs={() => go("docs")}
-          onGoDashboard={() => go(profile ? "dashboard" : "login")}
+          onGoLogin={() => setView("login")}
+          onGoDashboard={() => setView("dashboard")}
         />
       )}
       {view === "login" && <LoginPage onLogin={login} />}
       {view === "docs" && <DocsPage />}
       {view === "dashboard" && profile && (
-        <Dashboard profile={profile} onLogout={logout} />
+        <Dashboard
+          profile={profile}
+          page={headerDashboardPage}
+          onPageChange={setHeaderDashboardPage}
+        />
       )}
-      {!profile && view === "dashboard" && <LoginPage onLogin={login} />}
     </div>
   );
 }
-
-export default App;
