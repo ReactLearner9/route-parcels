@@ -2008,7 +2008,7 @@ function detectLikelyJsonField(source: string) {
 
 function formatSingleJsonParseReason(source: string, error: unknown) {
   if (/"[^"]+"\s*:\s*'/.test(source)) {
-    return "JSON values must use double quotes. Replace single-quoted values with valid JSON strings or numbers.";
+    return "Invalid JSON: single quotes are not allowed. Use double quotes for keys and string values.";
   }
 
   if (/,\s*[}\]]/.test(source)) {
