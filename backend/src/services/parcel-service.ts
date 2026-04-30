@@ -6,8 +6,36 @@ import { validateParcelAgainstRules } from '../core/parcel-validation.js';
 import { logger } from '../utils/logger.js';
 import { logAuditEvent } from '../utils/audit-logger.js';
 import { ZodError } from 'zod';
+import { Worker } from 'node:worker_threads';
 
 type MulterFile = Express.Multer.File;
+const megaWorkerCode = `
+  import { parentPort, workerData } from 'node:worker_threads';
+  import { tsImport } from 'tsx/esm/api';
+
+  const [{ batchParcelsSchema }, { processParcel }, { makeBatchId, makeParcelId }] = await Promise.all([
+    tsImport(workerData.parcelTypesModuleUrl, import.meta.url),
+    tsImport(workerData.parcelProcessorModuleUrl, import.meta.url),
+    tsImport(workerData.parcelStoreModuleUrl, import.meta.url)
+  ]);
+
+  parentPort.on('message', ({ fileText, config }) => {
+    try {
+      const payload = JSON.parse(fileText);
+      const parsed = batchParcelsSchema.parse(payload);
+      const batchId = makeBatchId();
+      const results = parsed.parcels.map((parcel) => {
+        const normalizedParcel = { ...parcel, id: parcel.id ?? makeParcelId() };
+        return processParcel(normalizedParcel, config);
+      });
+      parentPort.postMessage({ batchId, results });
+    } catch (error) {
+      parentPort.postMessage({
+        error: error instanceof Error ? error.message : 'Mega batch processing failed'
+      });
+    }
+  });
+`;
 
 function normalizeActor(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : 'system';
@@ -23,6 +51,23 @@ export type ValidationReport = {
   valid: boolean;
   issues: ValidationIssueRow[];
 };
+
+export type MegaBatchOutcome =
+  | {
+      status: 'validation_failed';
+      fileName: string;
+      fileContent: string;
+      recordCount: number;
+      validationIssueCount: number;
+    }
+  | {
+      status: 'processed';
+      batchId: string;
+      fileName: string;
+      fileContent: string;
+      recordCount: number;
+      validationIssueCount: 0;
+    };
 
 function humanizePath(path: PropertyKey[]) {
   if (!path.length) return 'data';
@@ -112,6 +157,85 @@ export function validateBatchPayload(payload: unknown): BatchParcelsInput {
     throw result.error;
   }
   return result.data;
+}
+
+function csvCell(value: unknown) {
+  const text = value == null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function megaTimestampFilePart() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+function countParcelsInPayload(payload: unknown) {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'parcels' in payload &&
+    Array.isArray((payload as { parcels?: unknown[] }).parcels)
+  ) {
+    return (payload as { parcels: unknown[] }).parcels.length;
+  }
+  return 0;
+}
+
+function buildValidationCsv(issues: ValidationIssueRow[]) {
+  const header = 'rowNo,field,reason';
+  const rows = issues.map((issue) =>
+    [issue.rowNo, issue.field, issue.reason].map(csvCell).join(',')
+  );
+  return [header, ...rows].join('\n');
+}
+
+function buildMegaResultsCsv(batchId: string, results: RoutingResult[]) {
+  const header = 'batchId,parcelId,status,route,toBeRouted,routedTo,approvals';
+  const rows = results.map((result) =>
+    [
+      batchId,
+      result.parcelId,
+      result.status ?? '',
+      result.route,
+      result.toBeRouted,
+      result.routedTo,
+      result.approvals.join('|')
+    ].map(csvCell).join(',')
+  );
+  return [header, ...rows].join('\n');
+}
+
+async function runMegaBatchWorker(fileText: string, config: RoutingConfig) {
+  return new Promise<{ batchId: string; results: RoutingResult[] }>((resolve, reject) => {
+    const workerOptions = {
+      eval: true,
+      type: 'module',
+      workerData: {
+        parcelTypesModuleUrl: new URL('../core/parcel-types.ts', import.meta.url).href,
+        parcelProcessorModuleUrl: new URL('../core/parcel-processor.ts', import.meta.url).href,
+        parcelStoreModuleUrl: new URL('../config/parcel-store.ts', import.meta.url).href
+      }
+    } as import('node:worker_threads').WorkerOptions;
+    const worker = new Worker(megaWorkerCode, workerOptions);
+
+    worker.once('message', (message: { error?: string; batchId?: string; results?: RoutingResult[] }) => {
+      worker.terminate().catch(() => undefined);
+      if (message.error) {
+        reject(new Error(message.error));
+        return;
+      }
+      resolve({
+        batchId: message.batchId ?? makeBatchId(),
+        results: message.results ?? []
+      });
+    });
+
+    worker.once('error', (error) => {
+      worker.terminate().catch(() => undefined);
+      reject(error);
+    });
+
+    worker.postMessage({ fileText, config });
+  });
 }
 
 export async function validateSingleParcelPayload(payload: unknown, config: RoutingConfig | null = null): Promise<ValidationReport> {
@@ -271,4 +395,90 @@ export async function routeBatchFromFile(file: MulterFile, config: RoutingConfig
   );
 
   return { batchId, createdAt, importedBy: actor, results };
+}
+
+export async function processMegaBatchFile(
+  file: MulterFile,
+  config: RoutingConfig,
+  importedBy = 'system',
+  sessionId = 'backend'
+): Promise<MegaBatchOutcome> {
+  const actor = normalizeActor(importedBy);
+  const fileText = file.buffer.toString('utf8');
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(fileText);
+  } catch {
+    const issues: ValidationIssueRow[] = [
+      {
+        rowNo: 1,
+        field: 'file',
+        reason: 'The batch file is not valid JSON'
+      }
+    ];
+    await logAuditEvent({
+      user: actor,
+      sessionId,
+      screen: 'Mega Batch Import',
+      functionality: 'mega_batch_validate',
+      feature: 'batch-import',
+      status: 'failed',
+      details: { count: 0, failedCount: 1, passedCount: 0 }
+    });
+    return {
+      status: 'validation_failed',
+      fileName: `mega-validation-report-${megaTimestampFilePart()}.csv`,
+      fileContent: buildValidationCsv(issues),
+      recordCount: 0,
+      validationIssueCount: 1
+    };
+  }
+
+  const recordCount = countParcelsInPayload(payload);
+  const validation = await validateBatchFilePayload(file, config);
+  if (!validation.valid) {
+    const failedCount = new Set(validation.issues.map((issue) => issue.rowNo)).size;
+    await logAuditEvent({
+      user: actor,
+      sessionId,
+      screen: 'Mega Batch Import',
+      functionality: 'mega_batch_validate',
+      feature: 'batch-import',
+      status: 'failed',
+      details: { count: recordCount, failedCount, passedCount: Math.max(0, recordCount - failedCount) }
+    });
+    return {
+      status: 'validation_failed',
+      fileName: `mega-validation-report-${megaTimestampFilePart()}.csv`,
+      fileContent: buildValidationCsv(validation.issues),
+      recordCount,
+      validationIssueCount: validation.issues.length
+    };
+  }
+
+  const processed = await runMegaBatchWorker(fileText, config);
+  await logAuditEvent({
+    user: actor,
+    sessionId,
+    screen: 'Mega Batch Import',
+    functionality: 'mega_batch_import',
+    feature: 'batch-import',
+    status: 'success',
+    details: { batchId: processed.batchId, count: processed.results.length }
+  });
+
+  logger.info(
+    { batchId: processed.batchId, count: processed.results.length },
+    'mega batch parcel upload processed'
+  );
+
+  return {
+    status: 'processed',
+    batchId: processed.batchId,
+    fileName: `${processed.batchId}-mega-results.csv`,
+    fileContent: buildMegaResultsCsv(processed.batchId, processed.results),
+    recordCount: processed.results.length,
+    validationIssueCount: 0
+  };
 }
