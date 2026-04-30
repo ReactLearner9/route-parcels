@@ -9,6 +9,6 @@ Thumbs.db
 frontend/.vite
 frontend/dist
 backend/dist
-frontend/docs/generated
+frontend/docs/*
 backend/data/*.json
 !backend/data/.gitkeep
