@@ -7,6 +7,7 @@ import { logger } from '../utils/logger.js';
 import { logAuditEvent } from '../utils/audit-logger.js';
 import { ZodError } from 'zod';
 import { Worker } from 'node:worker_threads';
+import { recordBatchImportFailure, recordValidationFailedUpload } from './alert-service.js';
 
 type MulterFile = Express.Multer.File;
 const megaWorkerCode = `
@@ -417,6 +418,7 @@ export async function processMegaBatchFile(
         reason: 'The batch file is not valid JSON'
       }
     ];
+    await recordValidationFailedUpload({ source: 'mega', issueCount: issues.length });
     await logAuditEvent({
       user: actor,
       sessionId,
@@ -439,6 +441,7 @@ export async function processMegaBatchFile(
   const validation = await validateBatchFilePayload(file, config);
   if (!validation.valid) {
     const failedCount = new Set(validation.issues.map((issue) => issue.rowNo)).size;
+    await recordValidationFailedUpload({ source: 'mega', issueCount: validation.issues.length });
     await logAuditEvent({
       user: actor,
       sessionId,
@@ -456,8 +459,16 @@ export async function processMegaBatchFile(
       validationIssueCount: validation.issues.length
     };
   }
-
-  const processed = await runMegaBatchWorker(fileText, config);
+  let processed: { batchId: string; results: RoutingResult[] };
+  try {
+    processed = await runMegaBatchWorker(fileText, config);
+  } catch (error) {
+    await recordBatchImportFailure({
+      source: 'mega',
+      reason: error instanceof Error ? error.message : 'Mega batch import failed'
+    });
+    throw error;
+  }
   await logAuditEvent({
     user: actor,
     sessionId,

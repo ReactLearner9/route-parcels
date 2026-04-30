@@ -3,6 +3,7 @@ import { megaUpload } from '../middleware/upload.js';
 import { getParcelCounts, listParcelRecords } from '../config/parcel-store.js';
 import { getAppliedConfig } from '../services/config-service.js';
 import { processMegaBatchFile } from '../services/parcel-service.js';
+import { recordInvalidMegaApiKeyAttempt } from '../services/alert-service.js';
 import type { RoutingConfig } from '../core/config-types.js';
 
 export const parcelsRouter = Router();
@@ -16,6 +17,14 @@ const fallbackConfig = {
     { type: 'route', priority: Number.MAX_SAFE_INTEGER, when: { field: 'weight', operator: '>', value: 0 }, action: { department: 'MANUAL_REVIEW' } }
   ]
 } satisfies RoutingConfig;
+
+function readRequestIp(request: import('express').Request) {
+  const forwardedFor = request.headers['x-forwarded-for'];
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    return forwardedFor.split(',')[0]?.trim() || 'unknown';
+  }
+  return request.ip || 'unknown';
+}
 
 parcelsRouter.get('/', async (request, response, next) => {
   try {
@@ -39,6 +48,7 @@ parcelsRouter.post('/mega', megaUpload.single('batchFile'), async (request, resp
 
     const apiKeyHeader = request.headers['x-api-key'];
     if (apiKeyHeader !== megaImportApiKey) {
+      await recordInvalidMegaApiKeyAttempt({ ip: readRequestIp(request) });
       response.status(403).json({ error: 'Forbidden', message: 'Invalid API key' });
       return;
     }

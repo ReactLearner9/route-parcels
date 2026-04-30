@@ -7,6 +7,7 @@ type HeaderNavItem = {
   key: string;
   label: string;
   icon: LucideIcon;
+  badgeCount?: number;
 };
 
 type SiteHeaderProps = {
@@ -100,7 +101,7 @@ export function SiteHeader({
         {profile && navItems.length > 0 && onNavigate ? (
           <div className="overflow-x-auto">
             <nav className="inline-flex min-w-full items-center gap-2 rounded-3xl border border-white/10 bg-white/4 p-2">
-              {navItems.map(({ key, label, icon: Icon }) => (
+              {navItems.map(({ key, label, icon: Icon, badgeCount }) => (
                 <button
                   key={key}
                   type="button"
@@ -113,6 +114,11 @@ export function SiteHeader({
                 >
                   <Icon className="h-4 w-4" />
                   <span>{label}</span>
+                  {typeof badgeCount === "number" && badgeCount > 0 && (
+                    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-400 px-1.5 py-0.5 text-[11px] font-bold text-slate-950">
+                      {badgeCount}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>
