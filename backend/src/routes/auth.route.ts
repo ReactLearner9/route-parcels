@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
+import { authRateLimit } from "../middleware/rate-limit.js";
 import {
   findUserByUsername,
   getAuthDb,
@@ -15,6 +16,7 @@ const credentialsSchema = z.object({
 });
 
 export const authRouter = Router();
+authRouter.use(authRateLimit);
 
 await seedUsers();
 
