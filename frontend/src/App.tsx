@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
-  BookOpenText,
   CheckCircle2,
   Copy,
   Eraser,
@@ -11,7 +10,6 @@ import {
   FileText,
   FileUp,
   Home,
-  LogOut,
   Pencil,
   Plus,
   Search,
@@ -24,9 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SiteHeader } from "./components/layout/site-header";
 import { APP_NAME } from "@/lib/app-meta";
-import AIUsageDocs from "../docs/ai-usage.mdx";
 
-type View = "landing" | "login" | "docs" | "dashboard";
+type View = "landing" | "login" | "dashboard";
 type Role = "admin" | "operator";
 type AuthMode = "login" | "register";
 type DashboardPage = "single" | "batch" | "analytics" | "rules" | "seed";
@@ -648,16 +645,6 @@ function LoginPage({
 
 async function logUiEvent(event: UiLogEvent) {
   void event;
-}
-
-function DocsPage() {
-  return (
-    <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
-      <Card className="border-white/10 bg-slate-950/55">
-        <AIUsageDocs />
-      </Card>
-    </main>
-  );
 }
 
 function Dashboard({
@@ -2587,7 +2574,6 @@ export default function App() {
         }
         onHome={() => setView("landing")}
         onLogin={() => setView("login")}
-        onDocs={() => setView("docs")}
         onLogout={logout}
         navItems={headerNavItems}
         activeNavKey={view === "dashboard" ? headerDashboardPage : undefined}
@@ -2605,7 +2591,6 @@ export default function App() {
         />
       )}
       {view === "login" && <LoginPage onLogin={login} />}
-      {view === "docs" && <DocsPage />}
       {view === "dashboard" && profile && (
         <Dashboard
           profile={profile}

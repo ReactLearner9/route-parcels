@@ -1,4 +1,4 @@
-import type { ApprovalRule, ConfigRule, Parcel, RouteRule } from './config-types.js';
+import type { ConfigRule, Parcel } from './config-types.js';
 import { operators } from './operators.js';
 
 export type ValidationIssue = {
@@ -79,18 +79,18 @@ export function validateParcelAgainstRules(
   if (!requireKnownCoreFields) return issues;
 
   if (!isPlainNumber(parcel.weight)) {
-        issues.push({
-          field: 'weight',
-          reason: 'The parcel weight is missing or not a valid number.',
-        });
-      }
+    issues.push({
+      field: 'weight',
+      reason: 'The parcel weight is missing or not a valid number.',
+    });
+  }
 
   if (!isPlainNumber(parcel.value)) {
-        issues.push({
-          field: 'value',
-          reason: 'The parcel value is missing or not a valid number.',
-        });
-      }
+    issues.push({
+      field: 'value',
+      reason: 'The parcel value is missing or not a valid number.',
+    });
+  }
 
   for (const check of collectRuleFieldChecks(rules)) {
     const fieldValue = getFieldValue(parcel, check.field);

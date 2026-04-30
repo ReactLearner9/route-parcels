@@ -1,6 +1,6 @@
 import { APP_NAME } from '@/lib/app-meta';
 import { Button } from '@/components/ui/button';
-import { BookOpenText, Home, LogOut, UserCircle2, type LucideIcon } from 'lucide-react';
+import { Home, LogOut, UserCircle2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 type HeaderNavItem = {
@@ -13,7 +13,6 @@ type SiteHeaderProps = {
   profile: { name: string; role: string } | null;
   onHome: () => void;
   onLogin: () => void;
-  onDocs: () => void;
   onLogout: () => void;
   navItems?: HeaderNavItem[];
   activeNavKey?: string;
@@ -24,7 +23,6 @@ export function SiteHeader({
   profile,
   onHome,
   onLogin,
-  onDocs,
   onLogout,
   navItems = [],
   activeNavKey,
@@ -65,13 +63,7 @@ export function SiteHeader({
 
           <div className="flex items-center gap-2">
             {!profile ? (
-              <>
-                <Button variant="ghost" onClick={onLogin}>Login</Button>
-                <Button variant="secondary" onClick={onDocs}>
-                  <BookOpenText className="h-4 w-4" />
-                  <span>Docs</span>
-                </Button>
-              </>
+              <Button variant="ghost" onClick={onLogin}>Login</Button>
             ) : (
               <div className="relative" ref={menuRef}>
                 <Button

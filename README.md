@@ -10,4 +10,4 @@ Full-stack TypeScript app for a backend API and a React frontend.
 ## Notes
 
 - This repository is intentionally scaffold-only at this stage.
-- Prompts used during development are tracked in `frontend/docs/ai-usage.mdx`.
+- Prompts used during development are tracked in `frontend/docs/ai-usage.md`.
