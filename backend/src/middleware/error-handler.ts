@@ -21,9 +21,10 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
   if (multerCode === 'LIMIT_FILE_SIZE') {
     status = 413;
     void logExceptionToFile(request, error);
+    const sizeLimit = request.originalUrl.includes('/api/parcels/mega') ? '25 MB' : '5 MB';
     response.status(status).json({
       error: 'Payload Too Large',
-      message: 'Uploaded file exceeds the 5 MB size limit.'
+      message: `Uploaded file exceeds the ${sizeLimit} size limit.`
     });
     return;
   }
