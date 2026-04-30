@@ -58,7 +58,7 @@ export function LoginPage({
 
   return (
     <main className="mx-auto grid max-w-5xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
-      <section className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.14),transparent_30%),linear-gradient(160deg,rgba(8,17,15,0.96),rgba(15,23,42,0.88))] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:p-8">
+      <section className="rounded-4xl border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.14),transparent_30%),linear-gradient(160deg,rgba(8,17,15,0.96),rgba(15,23,42,0.88))] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:p-8">
         <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">
           Access
         </p>

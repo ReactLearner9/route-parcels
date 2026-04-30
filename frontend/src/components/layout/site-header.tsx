@@ -99,7 +99,7 @@ export function SiteHeader({
 
         {profile && navItems.length > 0 && onNavigate ? (
           <div className="overflow-x-auto">
-            <nav className="inline-flex min-w-full items-center gap-2 rounded-[1.4rem] border border-white/10 bg-white/4 p-2">
+            <nav className="inline-flex min-w-full items-center gap-2 rounded-3xl border border-white/10 bg-white/4 p-2">
               {navItems.map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}

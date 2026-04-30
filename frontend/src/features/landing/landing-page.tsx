@@ -49,7 +49,7 @@ export function LandingPage({
 
   return (
     <main className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-      <section className="overflow-hidden rounded-[2rem] border border-emerald-400/20 bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.16),transparent_24%),linear-gradient(135deg,rgba(7,18,16,0.96),rgba(14,25,32,0.96))] px-6 py-8 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:px-8 sm:py-10">
+      <section className="overflow-hidden rounded-4xl border border-emerald-400/20 bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.16),transparent_24%),linear-gradient(135deg,rgba(7,18,16,0.96),rgba(14,25,32,0.96))] px-6 py-8 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:px-8 sm:py-10">
         <p className="text-xs uppercase tracking-[0.5em] text-emerald-300">
           {APP_NAME}
         </p>
@@ -71,7 +71,7 @@ export function LandingPage({
           <LandingStat label="Files Imported" value={stats.filesImported} />
         </div>
       </section>
-      <section className="space-y-6 rounded-[2rem] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
+      <section className="space-y-6 rounded-4xl border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
         <div className="max-w-3xl">
           <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
             Features
@@ -103,7 +103,7 @@ export function LandingPage({
           />
         </div>
       </section>
-      <section className="space-y-6 rounded-[2rem] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
+      <section className="space-y-6 rounded-4xl border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
         <div className="max-w-3xl">
           <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
             Users
@@ -133,7 +133,7 @@ export function LandingPage({
           />
         </div>
       </section>
-      <section className="space-y-4 rounded-[2rem] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
+      <section className="space-y-4 rounded-4xl border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
         <div>
           <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
             Stack
@@ -147,7 +147,7 @@ export function LandingPage({
 
 function LandingStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-[1.4rem] border border-white/10 bg-slate-950/55 px-5 py-4 backdrop-blur-xl">
+    <div className="rounded-3xl border border-white/10 bg-slate-950/55 px-5 py-4 backdrop-blur-xl">
       <p className="text-2xl font-semibold text-white sm:text-3xl">{value}</p>
       <p className="mt-1 text-xs uppercase tracking-[0.25em] text-emerald-200">
         {label}
@@ -257,7 +257,7 @@ function StackCarousel() {
             href={item.href}
             target="_blank"
             rel="noreferrer"
-            className="flex min-w-[15rem] items-center justify-center gap-4 rounded-3xl border border-white/10 bg-white/5 px-5 py-4"
+            className="flex min-w-60 items-center justify-center gap-4 rounded-3xl border border-white/10 bg-white/5 px-5 py-4"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-slate-950">
               <img

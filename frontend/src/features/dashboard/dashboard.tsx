@@ -910,7 +910,7 @@ export function Dashboard({
               setSingleValidated(false);
               setSingleLocked(false);
             }}
-            className="mt-4 max-h-64 min-h-64 w-full resize-none overflow-auto rounded-[1.4rem] border border-white/10 bg-slate-950/70 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
+            className="mt-4 max-h-64 min-h-64 w-full resize-none overflow-auto rounded-3xl border border-white/10 bg-slate-950/70 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
           />
           <div className="mt-3 flex flex-wrap gap-3">
             <Button variant="secondary" onClick={() => void validateSingle()}>

@@ -1,12 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  Copy,
-  Eraser,
-  FileSearch,
-  Pencil,
-  Search,
-  Trash2,
-} from "lucide-react";
+import { Copy, Eraser, FileSearch, Pencil, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {
   Condition,
@@ -33,7 +26,7 @@ function formatTime(value?: string) {
 
 export function DashboardNav({ profile }: { profile: UserProfile }) {
   return (
-    <section className="rounded-[1.75rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-5 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.2)] backdrop-blur-xl">
+    <section className="rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-5 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.2)] backdrop-blur-xl">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
@@ -51,13 +44,7 @@ export function DashboardNav({ profile }: { profile: UserProfile }) {
   );
 }
 
-export function SectionTitle({
-  title,
-  text,
-}: {
-  title: string;
-  text: string;
-}) {
+export function SectionTitle({ title, text }: { title: string; text: string }) {
   return (
     <div>
       <h2 className="text-[1.7rem] font-semibold tracking-tight text-white">
@@ -100,7 +87,7 @@ export function RouteResultsTable({
   emptyText?: string;
 }) {
   return (
-    <div className="mt-5 overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+    <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/35">
       <table className="w-full text-left text-sm">
         <thead className="bg-white/5 text-slate-300">
           <tr>
@@ -189,14 +176,14 @@ export function ValidationTable({
   groupBadgeLabel?: string;
 }) {
   return (
-    <div className="mt-5 overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+    <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/35">
       <table className="w-full text-left text-sm">
         <thead className="bg-white/5 text-slate-300">
           <tr>
-            <th className="w-[9rem] px-4 py-3">{groupColumnLabel}</th>
-            <th className="w-[14rem] px-4 py-3">Field</th>
+            <th className="w-36 px-4 py-3">{groupColumnLabel}</th>
+            <th className="w-56 px-4 py-3">Field</th>
             <th className="px-4 py-3">Reason</th>
-            <th className="w-[9rem] px-4 py-3">Issue Count</th>
+            <th className="w-36 px-4 py-3">Issue Count</th>
           </tr>
         </thead>
         <tbody>
@@ -254,13 +241,17 @@ export function ValidationTable({
   );
 }
 
-export function ConfigValidationTable({ issues }: { issues: ValidationIssue[] }) {
+export function ConfigValidationTable({
+  issues,
+}: {
+  issues: ValidationIssue[];
+}) {
   return (
-    <div className="mt-5 overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+    <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/35">
       <table className="w-full text-left text-sm">
         <thead className="bg-white/5 text-slate-300">
           <tr>
-            <th className="w-[16rem] px-4 py-3">Field</th>
+            <th className="w-64 px-4 py-3">Field</th>
             <th className="px-4 py-3">Reason</th>
           </tr>
         </thead>
@@ -313,7 +304,7 @@ export function SearchPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[1.5rem] border border-white/8 bg-slate-950/35 p-4">
+    <section className="rounded-3xl border border-white/8 bg-slate-950/35 p-4">
       <h3 className="mb-3 text-base font-semibold text-white sm:text-lg">
         {title}
       </h3>
@@ -322,7 +313,7 @@ export function SearchPanel({
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder={label}
-          className="min-w-0 flex-1 rounded-[1.15rem] border border-white/10 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-emerald-400"
+          className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-emerald-400"
         />
         <Button
           variant="secondary"
@@ -362,7 +353,8 @@ export function ConfigTable({
           {rules.length === 1 ? "1 rule" : `${rules.length} rules`}
         </span>
       </div>
-      <div className="overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
+      <div className="overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/35">
+        {" "}
         <table className="w-full text-left text-sm">
           <thead className="bg-white/5 text-slate-300">
             <tr>

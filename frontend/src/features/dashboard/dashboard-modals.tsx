@@ -157,7 +157,7 @@ export function ParcelInputDataModal({
             <p className="text-sm text-slate-300">Loading parcel input...</p>
           )}
           {!loading && modal && (
-            <pre className="max-h-[24rem] overflow-auto whitespace-pre-wrap break-words font-mono text-sm text-slate-100">
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-sm text-slate-100">
               {JSON.stringify(modal.input, null, 2)}
             </pre>
           )}
