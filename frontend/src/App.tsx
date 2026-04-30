@@ -2408,11 +2408,53 @@ function Pager({
   onPrev: () => void;
   onNext: () => void;
 }) {
+  const [pageInput, setPageInput] = useState(String(page));
+
+  useEffect(() => {
+    setPageInput(String(page));
+  }, [page]);
+
   return (
     <div className="mt-4 flex items-center justify-end gap-3 text-sm text-slate-300">
       <span>
         Page {page} of {pageCount}
       </span>
+      <div className="flex items-center gap-2">
+        <input
+          value={pageInput}
+          onChange={(event) => setPageInput(event.target.value)}
+          inputMode="numeric"
+          className="w-20 rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-right text-sm text-white outline-none focus:border-emerald-400"
+          aria-label="Go to page"
+        />
+        <Button
+          variant="secondary"
+          onClick={() => {
+            const parsedPage = Number(pageInput);
+            if (!Number.isFinite(parsedPage)) {
+              setPageInput(String(page));
+              return;
+            }
+            const nextPage = Math.min(
+              pageCount,
+              Math.max(1, Math.trunc(parsedPage)),
+            );
+            setPageInput(String(nextPage));
+            if (nextPage === page) return;
+            if (nextPage < page) {
+              for (let current = page; current > nextPage; current -= 1) {
+                onPrev();
+              }
+              return;
+            }
+            for (let current = page; current < nextPage; current += 1) {
+              onNext();
+            }
+          }}
+        >
+          Go to page
+        </Button>
+      </div>
       <Button variant="secondary" onClick={onPrev} disabled={page <= 1}>
         Prev
       </Button>
