@@ -27,6 +27,21 @@ function isPlainNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isComparablePrimitive(value: unknown) {
+  return (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  );
+}
+
+function valueTypeLabel(value: unknown) {
+  if (typeof value === 'string') return 'string';
+  if (typeof value === 'number') return 'numeric';
+  if (typeof value === 'boolean') return 'boolean';
+  return 'primitive';
+}
+
 function ruleLabel(rule: ConfigRule) {
   return rule.type === 'approval'
     ? `approval rule "${rule.action.approval}"`
@@ -96,12 +111,41 @@ export function validateParcelAgainstRules(
       continue;
     }
 
-    if (!isPlainNumber(fieldValue)) {
-      issues.push({
-        field: check.field,
-        reason: `The field ${check.field} must be numeric for ${check.ruleLabel}.`,
-      });
+    if (
+      check.operator === '>' ||
+      check.operator === '<' ||
+      check.operator === '>=' ||
+      check.operator === '<='
+    ) {
+      if (!isPlainNumber(fieldValue)) {
+        issues.push({
+          field: check.field,
+          reason: `The field ${check.field} must be numeric for ${check.ruleLabel}.`,
+        });
+      }
       continue;
+    }
+
+    if (check.operator === '==') {
+      if (!isComparablePrimitive(fieldValue)) {
+        issues.push({
+          field: check.field,
+          reason: `The field ${check.field} must be a string, number, or boolean for ${check.ruleLabel}.`,
+        });
+        continue;
+      }
+
+      if (
+        check.value !== undefined &&
+        check.value !== null &&
+        isComparablePrimitive(check.value) &&
+        typeof fieldValue !== typeof check.value
+      ) {
+        issues.push({
+          field: check.field,
+          reason: `The field ${check.field} must be ${valueTypeLabel(check.value)} for ${check.ruleLabel}.`,
+        });
+      }
     }
   }
 

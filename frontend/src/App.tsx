@@ -6,6 +6,7 @@ import {
   Copy,
   Eraser,
   Eye,
+  FileSearch,
   FileText,
   FileUp,
   Home,
@@ -29,7 +30,11 @@ type Role = "admin" | "operator";
 type AuthMode = "login" | "register";
 type DashboardPage = "single" | "batch" | "analytics" | "rules" | "seed";
 type RouteStatus = "processed" | "approval pending" | "defaulted" | "errored";
-type DashboardNavItem = { key: DashboardPage; label: string; icon: typeof Search };
+type DashboardNavItem = {
+  key: DashboardPage;
+  label: string;
+  icon: typeof Search;
+};
 
 type UserProfile = { id: string; username: string; role: Role };
 type LoginForm = { username: string; password: string; role: Role };
@@ -71,36 +76,20 @@ type BatchRouteOutcome = {
 };
 
 type StoredParcelRecord = {
-  batchId?: string;
-  source: "single" | "batch";
+  batchId: string | null;
   createdAt: string;
   importedBy: string;
-  input: unknown;
-  results: RoutingResult | RoutingResult[];
+  input: { id?: string; [key: string]: unknown };
+  result: RoutingResult;
 };
 
-type AuditRow = {
-  id: string;
-  batchId: string;
-  source: "single" | "batch" | "config";
-  step: string;
-  createdAt: string;
-  actor?: string;
-  message: string;
-  parcelIds?: string[];
-  route?: string;
-  details?: Record<string, unknown>;
+type ParcelListResponse = {
+  records: StoredParcelRecord[];
 };
 
-type HistoryResponse = {
-  singles: StoredParcelRecord[];
-  batches: StoredParcelRecord[];
-  audits: AuditRow[];
-};
-
-type TraceResponse = {
-  single: StoredParcelRecord | null;
-  batch: StoredParcelRecord | null;
+type ParcelCountResponse = {
+  parcelCount: number;
+  batchCount: number;
 };
 
 type Condition = {
@@ -150,13 +139,18 @@ type SeedConfirmState = {
   confirmLabel: string;
 };
 
+type ParcelInputModalState = {
+  parcelId: string;
+  input: unknown;
+};
+
 type UiLogEvent = {
   user: string;
   sessionId?: string;
   screen: string;
   functionality: string;
   feature: "single-import" | "batch-import" | "analytics" | "config" | "seed";
-  phase: "started" | "ended";
+  phase?: "started" | "ended";
   status?: "passed" | "failed" | "success" | "not_found" | "found";
   timestamp?: string;
   durationMs?: number;
@@ -211,7 +205,8 @@ function useStoredProfile() {
 
   const save = (next: UserProfile | null) => {
     setProfile(next);
-    if (next) localStorage.setItem("route-parcels-profile", JSON.stringify(next));
+    if (next)
+      localStorage.setItem("route-parcels-profile", JSON.stringify(next));
     else localStorage.removeItem("route-parcels-profile");
   };
 
@@ -264,15 +259,10 @@ function LandingPage({
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const history = await api<HistoryResponse>("/api/history");
-        const singleResults = history.singles.map((record) => record.results as RoutingResult);
-        const batchResults = history.batches.flatMap((record) =>
-          Array.isArray(record.results) ? record.results : [],
-        );
-        const allResults = [...singleResults, ...batchResults];
+        const counts = await api<ParcelCountResponse>("/api/parcels/count");
         setStats({
-          parcelsRouted: allResults.length,
-          filesImported: history.batches.length,
+          parcelsRouted: counts.parcelCount,
+          filesImported: counts.batchCount,
         });
       } catch {
         setStats({
@@ -295,7 +285,8 @@ function LandingPage({
           A modern platform for routing, review, and traceability.
         </h1>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 sm:text-base">
-          Import parcels, validate rule-driven data, and use built-in analytics from a polished routing dashboard.
+          Import parcels, validate rule-driven data, and use built-in analytics
+          from a polished routing dashboard.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Button onClick={profile ? onGoDashboard : onGoLogin}>
@@ -310,7 +301,9 @@ function LandingPage({
       </section>
       <section className="space-y-6 rounded-[2rem] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
         <div className="max-w-3xl">
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Features</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
+            Features
+          </p>
           <h2 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">
             Everything needed to move parcels cleanly
           </h2>
@@ -338,9 +331,11 @@ function LandingPage({
           />
         </div>
       </section>
-      <section className="space-y-6">
+      <section className="space-y-6 rounded-[2rem] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
         <div className="max-w-3xl">
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Users</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
+            Users
+          </p>
           <h2 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">
             Who uses the system and what they can do
           </h2>
@@ -366,9 +361,11 @@ function LandingPage({
           />
         </div>
       </section>
-      <section className="space-y-4">
+      <section className="space-y-4 rounded-[2rem] border border-white/10 bg-slate-950/45 p-6 backdrop-blur-xl sm:p-7">
         <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Stack</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
+            Stack
+          </p>
         </div>
         <StackCarousel />
       </section>
@@ -380,7 +377,9 @@ function LandingStat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-[1.4rem] border border-white/10 bg-slate-950/55 px-5 py-4 backdrop-blur-xl">
       <p className="text-2xl font-semibold text-white sm:text-3xl">{value}</p>
-      <p className="mt-1 text-xs uppercase tracking-[0.25em] text-emerald-200">{label}</p>
+      <p className="mt-1 text-xs uppercase tracking-[0.25em] text-emerald-200">
+        {label}
+      </p>
     </div>
   );
 }
@@ -424,7 +423,10 @@ function UserCard({
       <h3 className="mt-4 text-xl font-semibold text-white">{title}</h3>
       <ul className="mt-5 w-full max-w-sm space-y-3 text-sm leading-6 text-slate-300">
         {items.map((item) => (
-          <li key={item} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-3">
+          <li
+            key={item}
+            className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-3"
+          >
             <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-300" />
             <span>{item}</span>
           </li>
@@ -448,15 +450,20 @@ function StackCarousel() {
   const track = [...items, ...items];
 
   return (
-    <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 py-6">
-      <div className="stack-marquee flex w-max gap-4 px-4">
+    <div className="overflow-hidden px-6 py-6 sm:px-8">
+      <div className="stack-marquee flex w-max gap-4 px-6 sm:px-8">
         {track.map((item, index) => (
           <div
             key={`${item.label}-${index}`}
-            className="flex min-w-[15rem] items-center justify-center gap-4 rounded-3xl border border-white/10 bg-slate-950/80 px-5 py-4"
+            className="flex min-w-[15rem] items-center justify-center gap-4 rounded-3xl border border-white/10 bg-white/5 px-5 py-4"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-slate-950">
-              <img src={item.src} alt={`${item.label} logo`} className="h-7 w-7 object-contain" loading="lazy" />
+              <img
+                src={item.src}
+                alt={`${item.label} logo`}
+                className="h-7 w-7 object-contain"
+                loading="lazy"
+              />
             </div>
             <p className="text-lg font-semibold text-white">{item.label}</p>
           </div>
@@ -482,16 +489,23 @@ function LoginPage({
   return (
     <main className="mx-auto grid max-w-5xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
       <section className="rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(52,211,153,0.14),transparent_30%),linear-gradient(160deg,rgba(8,17,15,0.96),rgba(15,23,42,0.88))] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.28)] sm:p-8">
-        <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">Access</p>
+        <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">
+          Access
+        </p>
         <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
-          {mode === "login" ? "Sign in and keep parcels moving." : "Create an account for your routing workspace."}
+          {mode === "login"
+            ? "Sign in and keep parcels moving."
+            : "Create an account for your routing workspace."}
         </h1>
         <p className="mt-4 max-w-xl text-sm leading-7 text-slate-300">
-          Use the same streamlined workspace for imports, validation, trace history, and configuration changes.
+          Use the same streamlined workspace for imports, validation, trace
+          history, and configuration changes.
         </p>
       </section>
       <Card className="border-emerald-400/16">
-        <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">{mode === "login" ? "Login" : "Register"}</p>
+        <p className="text-xs uppercase tracking-[0.45em] text-emerald-300">
+          {mode === "login" ? "Login" : "Register"}
+        </p>
         <h2 className="mt-3 text-2xl font-semibold text-white">
           {mode === "login" ? "Welcome back" : "Set up your account"}
         </h2>
@@ -503,7 +517,11 @@ function LoginPage({
               setError(null);
               await onLogin(form, mode);
             } catch (loginError) {
-              setError(loginError instanceof Error ? loginError.message : "Login failed");
+              setError(
+                loginError instanceof Error
+                  ? loginError.message
+                  : "Login failed",
+              );
             }
           }}
         >
@@ -512,7 +530,10 @@ function LoginPage({
               className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
               value={form.role}
               onChange={(event) =>
-                setForm((current) => ({ ...current, role: event.target.value as Role }))
+                setForm((current) => ({
+                  ...current,
+                  role: event.target.value as Role,
+                }))
               }
             >
               <option value="operator">Operator</option>
@@ -522,23 +543,36 @@ function LoginPage({
           <input
             className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
             value={form.username}
-            onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                username: event.target.value,
+              }))
+            }
             placeholder="Username"
           />
           <PasswordField
             value={form.password}
-            onChange={(value) => setForm((current) => ({ ...current, password: value }))}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, password: value }))
+            }
           />
-            <div className="flex flex-wrap gap-3 pt-1">
-              <Button type="submit">{mode === "login" ? "Login" : "Register"}</Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setMode((current) => (current === "login" ? "register" : "login"))}
-              >
-                {mode === "login" ? "Register" : "Switch to login"}
-              </Button>
-            </div>
+          <div className="flex flex-wrap gap-3 pt-1">
+            <Button type="submit">
+              {mode === "login" ? "Login" : "Register"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                setMode((current) =>
+                  current === "login" ? "register" : "login",
+                )
+              }
+            >
+              {mode === "login" ? "Register" : "Switch to login"}
+            </Button>
+          </div>
           {error && <p className="text-sm text-rose-300">{error}</p>}
         </form>
       </Card>
@@ -547,18 +581,7 @@ function LoginPage({
 }
 
 async function logUiEvent(event: UiLogEvent) {
-  try {
-    const storedSessionId = sessionStorage.getItem("route-parcels-session-id");
-    const sessionId = storedSessionId ?? `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-    if (!storedSessionId) sessionStorage.setItem("route-parcels-session-id", sessionId);
-    await fetch("/api/logs/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...event, sessionId, timestamp: event.timestamp ?? new Date().toISOString() }),
-    });
-  } catch {
-    // Intentionally ignore logger transport failures.
-  }
+  void event;
 }
 
 function DocsPage() {
@@ -580,37 +603,54 @@ function Dashboard({
   page: DashboardPage;
   onPageChange: (page: DashboardPage) => void;
 }) {
-  const [history, setHistory] = useState<HistoryResponse>({ singles: [], batches: [], audits: [] });
   const [configState, setConfigState] = useState<ConfigResponse | null>(null);
   const [singleText, setSingleText] = useState(defaultSingle);
   const [singleValidated, setSingleValidated] = useState(false);
-  const [singleOutcome, setSingleOutcome] = useState<SingleRouteOutcome | null>(null);
+  const [singleOutcome, setSingleOutcome] = useState<SingleRouteOutcome | null>(
+    null,
+  );
   const [singleLocked, setSingleLocked] = useState(false);
   const [batchFile, setBatchFile] = useState<File | null>(null);
   const [batchValidated, setBatchValidated] = useState(false);
-  const [batchOutcome, setBatchOutcome] = useState<BatchRouteOutcome | null>(null);
+  const [batchOutcome, setBatchOutcome] = useState<BatchRouteOutcome | null>(
+    null,
+  );
   const [batchLocked, setBatchLocked] = useState(false);
   const [batchUploadPage, setBatchUploadPage] = useState(1);
   const [analyticsBatchPage, setAnalyticsBatchPage] = useState(1);
   const [batchIssuePage, setBatchIssuePage] = useState(1);
   const [failedRows, setFailedRows] = useState<ValidationIssue[]>([]);
-  const [failedSection, setFailedSection] = useState<"single" | "batch" | "config" | null>(null);
+  const [failedSection, setFailedSection] = useState<
+    "single" | "batch" | "config" | null
+  >(null);
   const [parcelSearchInput, setParcelSearchInput] = useState("");
   const [batchSearchInput, setBatchSearchInput] = useState("");
   const [selectedParcelId, setSelectedParcelId] = useState("");
-  const [selectedSingleRecord, setSelectedSingleRecord] = useState<StoredParcelRecord | null>(null);
-  const [selectedSingleResult, setSelectedSingleResult] = useState<RoutingResult | null>(null);
+  const [selectedSingleRecord, setSelectedSingleRecord] =
+    useState<StoredParcelRecord | null>(null);
+  const [selectedSingleResult, setSelectedSingleResult] =
+    useState<RoutingResult | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState("");
+  const [selectedBatchRecords, setSelectedBatchRecords] = useState<
+    StoredParcelRecord[]
+  >(
+    [],
+  );
   const [singleSearchLoading, setSingleSearchLoading] = useState(false);
   const [batchSearchLoading, setBatchSearchLoading] = useState(false);
   const [seedDataLoading, setSeedDataLoading] = useState(false);
   const [seedBatchPage, setSeedBatchPage] = useState(1);
+  const [seededBatchRecords, setSeededBatchRecords] = useState<StoredParcelRecord[]>([]);
   const [configModal, setConfigModal] = useState<ConfigModalState | null>(null);
   const [configModalText, setConfigModalText] = useState("");
   const [modalMessage, setModalMessage] = useState<string | null>(null);
-  const [configModalIssues, setConfigModalIssues] = useState<ValidationIssue[]>([]);
+  const [configModalIssues, setConfigModalIssues] = useState<ValidationIssue[]>(
+    [],
+  );
   const [configModalValidated, setConfigModalValidated] = useState(false);
   const [seedConfirm, setSeedConfirm] = useState<SeedConfirmState | null>(null);
+  const [parcelInputModal, setParcelInputModal] = useState<ParcelInputModalState | null>(null);
+  const [parcelInputLoading, setParcelInputLoading] = useState(false);
   const batchFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const visiblePages = useMemo<DashboardNavItem[]>(
@@ -631,12 +671,9 @@ function Dashboard({
   );
 
   useEffect(() => {
-    if (!visiblePages.some((entry) => entry.key === page)) onPageChange(visiblePages[0].key);
+    if (!visiblePages.some((entry) => entry.key === page))
+      onPageChange(visiblePages[0].key);
   }, [page, visiblePages]);
-
-  const refreshHistory = async () => {
-    setHistory(await api<HistoryResponse>("/api/history"));
-  };
 
   const refreshConfig = async () => {
     try {
@@ -653,36 +690,38 @@ function Dashboard({
   const approvalRules = configState?.approvalConfig?.rules ?? [];
   const routingRules = configState?.routingConfig?.rules ?? [];
   const selectedSingle = selectedSingleResult;
-  const selectedBatch = history.batches.find((record) => {
-    const batchId = record.batchId ?? "";
-    const results = Array.isArray(record.results) ? record.results : [];
-    return (
-      batchId.toLowerCase() === selectedBatchId.toLowerCase() ||
-      results.some((result) => result.parcelId.toLowerCase() === selectedBatchId.toLowerCase())
-    );
-  });
-  const batchResultPageCount = Math.max(1, Math.ceil((batchOutcome?.results.length ?? 0) / pageSize));
+  const batchResultPageCount = Math.max(
+    1,
+    Math.ceil((batchOutcome?.results.length ?? 0) / pageSize),
+  );
   const batchResultSlice = (batchOutcome?.results ?? []).slice(
     (batchUploadPage - 1) * pageSize,
     batchUploadPage * pageSize,
   );
-  const analyticsBatchResults = selectedBatch && Array.isArray(selectedBatch.results) ? selectedBatch.results : [];
-  const analyticsBatchPageCount = Math.max(1, Math.ceil(analyticsBatchResults.length / pageSize));
+  const analyticsBatchResults = selectedBatchRecords.map((record) => record.result);
+  const analyticsBatchPageCount = Math.max(
+    1,
+    Math.ceil(analyticsBatchResults.length / pageSize),
+  );
   const analyticsBatchSlice = analyticsBatchResults.slice(
     (analyticsBatchPage - 1) * pageSize,
     analyticsBatchPage * pageSize,
   );
-  const seededBatch = [...history.batches]
-    .reverse()
-    .find((record) => record.importedBy === "system" && Array.isArray(record.results));
-  const seededBatchResults = seededBatch && Array.isArray(seededBatch.results) ? seededBatch.results : [];
-  const seededBatchPageCount = Math.max(1, Math.ceil(seededBatchResults.length / pageSize));
+  const seededBatch = seededBatchRecords[0] ?? null;
+  const seededBatchResults = seededBatchRecords.map((record) => record.result);
+  const seededBatchPageCount = Math.max(
+    1,
+    Math.ceil(seededBatchResults.length / pageSize),
+  );
   const seededBatchSlice = seededBatchResults.slice(
     (seedBatchPage - 1) * pageSize,
     seedBatchPage * pageSize,
   );
   const groupedIssues = groupIssues(failedRows);
-  const issuePageCount = Math.max(1, Math.ceil(groupedIssues.length / issuePageSize));
+  const issuePageCount = Math.max(
+    1,
+    Math.ceil(groupedIssues.length / issuePageSize),
+  );
   const issueGroupsSlice = groupedIssues.slice(
     (batchIssuePage - 1) * issuePageSize,
     batchIssuePage * issuePageSize,
@@ -698,11 +737,14 @@ function Dashboard({
     });
     try {
       const parsed = JSON.parse(singleText) as Record<string, unknown>;
-      const report = await api<ValidationReport>("/api/upload/validate/single", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed),
-      });
+      const report = await api<ValidationReport>(
+        "/api/upload/validate/single",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed),
+        },
+      );
       setSingleValidated(report.valid);
       setSingleOutcome(null);
       if (report.valid) {
@@ -782,7 +824,9 @@ function Dashboard({
         },
       });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Single routing failed");
+      toast.error(
+        error instanceof Error ? error.message : "Single routing failed",
+      );
       await logUiEvent({
         user: profile.username,
         screen: "Import Single",
@@ -838,7 +882,8 @@ function Dashboard({
       } catch {
         totalCount = 0;
       }
-      const failedCount = new Set(report.issues.map((issue) => issue.rowNo)).size;
+      const failedCount = new Set(report.issues.map((issue) => issue.rowNo))
+        .size;
       const passedCount = Math.max(0, totalCount - failedCount);
       await logUiEvent({
         user: profile.username,
@@ -851,7 +896,13 @@ function Dashboard({
         details: { count: totalCount, failedCount, passedCount },
       });
     } catch (error) {
-      setFailedRows([{ rowNo: 1, field: "file", reason: error instanceof Error ? error.message : "Invalid batch file" }]);
+      setFailedRows([
+        {
+          rowNo: 1,
+          field: "file",
+          reason: error instanceof Error ? error.message : "Invalid batch file",
+        },
+      ]);
       setFailedSection("batch");
       setBatchValidated(false);
       toast.error("Batch validation failed");
@@ -911,7 +962,9 @@ function Dashboard({
         },
       });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Batch routing failed");
+      toast.error(
+        error instanceof Error ? error.message : "Batch routing failed",
+      );
       await logUiEvent({
         user: profile.username,
         screen: "Import Batch",
@@ -961,26 +1014,14 @@ function Dashboard({
     });
     setSingleSearchLoading(true);
     try {
-      const trace = await api<TraceResponse>(`/api/history/trace/${encodeURIComponent(identifier)}`);
-      setSelectedParcelId(identifier);
-      const batchResults = trace.batch && Array.isArray(trace.batch.results) ? trace.batch.results : [];
-      const batchInputs = trace.batch && Array.isArray(trace.batch.input) ? trace.batch.input : [];
-      const inputId = identifier.toLowerCase();
-      const matchingBatchResult = batchResults.find((result) => result.parcelId.toLowerCase() === inputId);
-      const matchingBatchIndex = batchInputs.findIndex((parcel) => {
-        const inputId = identifier.toLowerCase();
-        return (parcel as { id?: string }).id?.toLowerCase() === inputId;
-      });
-      const matchingBatchInputResult =
-        matchingBatchIndex >= 0 ? batchResults[matchingBatchIndex] ?? null : null;
-      setSelectedSingleRecord(trace.single ?? trace.batch);
-      setSelectedSingleResult(
-        trace.single
-          ? (trace.single.results as RoutingResult)
-          : matchingBatchResult ??
-            matchingBatchInputResult,
+      const response = await api<ParcelListResponse>(
+        `/api/parcels?parcelId=${encodeURIComponent(identifier)}`,
       );
-      const found = Boolean(trace.single || matchingBatchResult || matchingBatchInputResult);
+      setSelectedParcelId(identifier);
+      const record = response.records[0] ?? null;
+      setSelectedSingleRecord(record);
+      setSelectedSingleResult(record ? record.result : null);
+      const found = Boolean(record);
       await logUiEvent({
         user: profile.username,
         screen: "Analytics",
@@ -1021,26 +1062,21 @@ function Dashboard({
     });
     setBatchSearchLoading(true);
     try {
-      const refreshed = await api<HistoryResponse>("/api/history");
-      setHistory(refreshed);
+      setSelectedBatchRecords([]);
+      const response = await api<ParcelListResponse>(
+        `/api/parcels?batchId=${encodeURIComponent(identifier)}`,
+      );
       setSelectedBatchId(identifier);
+      setSelectedBatchRecords(response.records);
       setAnalyticsBatchPage(1);
-      const matched = refreshed.batches.find((record) => {
-        const batchId = record.batchId ?? "";
-        const results = Array.isArray(record.results) ? record.results : [];
-        return (
-          batchId.toLowerCase() === identifier.toLowerCase() ||
-          results.some((result) => result.parcelId.toLowerCase() === identifier.toLowerCase())
-        );
-      });
-      const batchRecordCount = matched && Array.isArray(matched.results) ? matched.results.length : 0;
+      const batchRecordCount = response.records.length;
       await logUiEvent({
         user: profile.username,
         screen: "Analytics",
         functionality: "batch_search",
         feature: "analytics",
         phase: "ended",
-        status: matched ? "found" : "not_found",
+        status: response.records.length ? "found" : "not_found",
         durationMs: Math.round(performance.now() - startedAt),
         details: { searchId: identifier, recordCount: batchRecordCount },
       });
@@ -1064,7 +1100,26 @@ function Dashboard({
   const loadSeededData = async () => {
     setSeedDataLoading(true);
     try {
-      await refreshHistory();
+      const response = await api<ParcelListResponse>(
+        "/api/parcels?importedBy=system",
+      );
+      const seededGrouped = response.records.reduce<Map<string, StoredParcelRecord[]>>(
+        (groups, record) => {
+          if (!record.batchId) return groups;
+          const list = groups.get(record.batchId) ?? [];
+          list.push(record);
+          groups.set(record.batchId, list);
+          return groups;
+        },
+        new Map(),
+      );
+      const latestBatchRecords = [...seededGrouped.values()]
+        .sort((a, b) => {
+          const left = a[0]?.createdAt ?? "";
+          const right = b[0]?.createdAt ?? "";
+          return right.localeCompare(left);
+        })[0] ?? [];
+      setSeededBatchRecords(latestBatchRecords);
       setSeedBatchPage(1);
     } catch {
       toast.error("Unable to load seeded data");
@@ -1090,9 +1145,42 @@ function Dashboard({
     }
   };
 
-  const submitConfig = async (section: "approval" | "route", mode: "validate" | "apply", rules: ConfigRule[]) => {
+  const closeParcelInputModal = () => {
+    setParcelInputModal(null);
+    setParcelInputLoading(false);
+  };
+
+  const openParcelInputModal = async (parcelId: string) => {
+    setParcelInputLoading(true);
+    try {
+      const response = await api<ParcelListResponse>(
+        `/api/parcels?parcelId=${encodeURIComponent(parcelId)}`,
+      );
+      const record = response.records[0];
+      if (!record) {
+        toast.error("Parcel input not found");
+        return;
+      }
+      setParcelInputModal({ parcelId, input: record.input });
+    } catch {
+      toast.error("Unable to load parcel input");
+    } finally {
+      setParcelInputLoading(false);
+    }
+  };
+
+  const submitConfig = async (
+    section: "approval" | "route",
+    mode: "validate" | "apply",
+    rules: ConfigRule[],
+  ) => {
     const startedAt = performance.now();
-    const configAction = mode === "apply" ? (configModal?.mode === "edit" ? "rule_modify" : "rule_add") : "rule_validate";
+    const configAction =
+      mode === "apply"
+        ? configModal?.mode === "edit"
+          ? "rule_modify"
+          : "rule_add"
+        : "rule_validate";
     await logUiEvent({
       user: profile.username,
       screen: "Config",
@@ -1103,9 +1191,19 @@ function Dashboard({
     });
     const endpoint = `/api/config/${section === "approval" ? "approval" : "routing"}/${mode}`;
     const formData = new FormData();
-    formData.append("configFile", new File([JSON.stringify({ rules }, null, 2)], "config.json", { type: "application/json" }));
+    formData.append(
+      "configFile",
+      new File([JSON.stringify({ rules }, null, 2)], "config.json", {
+        type: "application/json",
+      }),
+    );
     if (mode === "apply") formData.append("modifiedBy", profile.username);
-    const report = await api<{ valid?: boolean; issues?: ValidationIssue[]; applied?: boolean; checksum?: string }>(endpoint, {
+    const report = await api<{
+      valid?: boolean;
+      issues?: ValidationIssue[];
+      applied?: boolean;
+      checksum?: string;
+    }>(endpoint, {
       method: "POST",
       body: formData,
     });
@@ -1154,9 +1252,14 @@ function Dashboard({
     return true;
   };
 
-  const openConfigModal = (section: "approval" | "route", mode: "new" | "edit", index?: number) => {
+  const openConfigModal = (
+    section: "approval" | "route",
+    mode: "new" | "edit",
+    index?: number,
+  ) => {
     const rules = section === "approval" ? approvalRules : routingRules;
-    const selected = typeof index === "number" ? stripMetadata(rules[index]) : null;
+    const selected =
+      typeof index === "number" ? stripMetadata(rules[index]) : null;
     setConfigModal({ section, mode, index });
     setConfigModalText(
       selected
@@ -1178,19 +1281,32 @@ function Dashboard({
     if (!configModal) return;
     try {
       const parsed = JSON.parse(configModalText) as ConfigRule;
-      const currentRules = configModal.section === "approval" ? approvalRules : routingRules;
+      const currentRules =
+        configModal.section === "approval" ? approvalRules : routingRules;
       const businessRules = currentRules.map((rule) => stripMetadata(rule));
       const nextRules =
         configModal.mode === "edit" && typeof configModal.index === "number"
-          ? businessRules.map((rule, index) => (index === configModal.index ? parsed : rule))
+          ? businessRules.map((rule, index) =>
+              index === configModal.index ? parsed : rule,
+            )
           : [...businessRules, parsed];
       if (mode === "apply") {
-        const valid = await submitConfig(configModal.section, "validate", nextRules);
+        const valid = await submitConfig(
+          configModal.section,
+          "validate",
+          nextRules,
+        );
         if (!valid) return;
       }
       await submitConfig(configModal.section, mode, nextRules);
     } catch (error) {
-      const issues = [{ rowNo: 1, field: "json", reason: error instanceof Error ? error.message : "Invalid input" }];
+      const issues = [
+        {
+          rowNo: 1,
+          field: "json",
+          reason: error instanceof Error ? error.message : "Invalid input",
+        },
+      ];
       setFailedRows(issues);
       setConfigModalIssues(issues);
       setFailedSection("config");
@@ -1241,13 +1357,15 @@ function Dashboard({
         ? {
             action,
             title: "Reset Parcel Data?",
-            message: "This will wipe the current single parcel and batch lowdb records and replace them with seeded demo data.",
+            message:
+              "This will wipe the current single parcel and batch lowdb records and replace them with seeded demo data.",
             confirmLabel: "Reset parcel and batch data",
           }
         : {
             action,
             title: "Reset Config Data?",
-            message: "This will wipe the current approval and routing config records and replace them with the seeded configuration.",
+            message:
+              "This will wipe the current approval and routing config records and replace them with the seeded configuration.",
             confirmLabel: "Reset config data",
           },
     );
@@ -1275,13 +1393,26 @@ function Dashboard({
     });
   }, [page, approvalRules.length, routingRules.length, profile.username]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (parcelInputModal) closeParcelInputModal();
+      if (configModal) closeConfigModal();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [parcelInputModal, configModal]);
+
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
       <DashboardNav profile={profile} />
 
       {page === "single" && (
         <Card className="space-y-3.5">
-          <SectionTitle title="Import Single" text="Paste one parcel JSON body, validate it, then route it." />
+          <SectionTitle
+            title="Import Single"
+            text="Paste one parcel JSON body, validate it, then route it."
+          />
           <textarea
             value={singleText}
             onChange={(event) => {
@@ -1299,14 +1430,18 @@ function Dashboard({
             </Button>
             <Button
               onClick={() => void routeSingle()}
-              disabled={singleLocked || !singleValidated || (failedSection === "single" && failedRows.length > 0)}
+              disabled={
+                singleLocked ||
+                !singleValidated ||
+                (failedSection === "single" && failedRows.length > 0)
+              }
             >
               <FileUp className="h-4 w-4" />
               <span className="ml-2">Route Single</span>
             </Button>
-            {(singleOutcome || (failedSection === "single" && failedRows.length > 0) || singleValidated) && (
-              <TryNewButton onClick={resetSingle} />
-            )}
+            {(singleOutcome ||
+              (failedSection === "single" && failedRows.length > 0) ||
+              singleValidated) && <TryNewButton onClick={resetSingle} />}
           </div>
           {failedSection === "single" && failedRows.length > 0 && (
             <ValidationTable issues={failedRows} pagedGroups={groupedIssues} />
@@ -1318,6 +1453,7 @@ function Dashboard({
               importedBy={singleOutcome.importedBy}
               createdAt={singleOutcome.createdAt}
               copyAndToast={copyAndToast}
+              onViewParcel={openParcelInputModal}
             />
           )}
         </Card>
@@ -1325,7 +1461,10 @@ function Dashboard({
 
       {page === "batch" && (
         <Card className="space-y-3.5">
-          <SectionTitle title="Import Batch" text="Select a JSON file containing parcels, validate it, then apply it." />
+          <SectionTitle
+            title="Import Batch"
+            text="Select a JSON file containing parcels, validate it, then apply it."
+          />
           <div className="mt-4 space-y-2.5">
             <input
               ref={batchFileInputRef}
@@ -1346,31 +1485,50 @@ function Dashboard({
               }}
             />
             <div className="flex flex-wrap gap-3">
-              <Button variant="secondary" onClick={() => void validateBatch()} disabled={!batchFile}>
+              <Button
+                variant="secondary"
+                onClick={() => void validateBatch()}
+                disabled={!batchFile}
+              >
                 <CheckCircle2 className="h-4 w-4" />
                 <span className="ml-2">Validate</span>
               </Button>
               <Button
                 onClick={() => void routeBatch()}
-                disabled={!batchFile || batchLocked || !batchValidated || (failedSection === "batch" && failedRows.length > 0)}
+                disabled={
+                  !batchFile ||
+                  batchLocked ||
+                  !batchValidated ||
+                  (failedSection === "batch" && failedRows.length > 0)
+                }
               >
                 <FileUp className="h-4 w-4" />
                 <span className="ml-2">Apply</span>
               </Button>
-              {(batchFile || batchOutcome || (failedSection === "batch" && failedRows.length > 0) || batchValidated) && (
-                <TryNewButton onClick={resetBatch} />
-              )}
+              {(batchFile ||
+                batchOutcome ||
+                (failedSection === "batch" && failedRows.length > 0) ||
+                batchValidated) && <TryNewButton onClick={resetBatch} />}
             </div>
           </div>
           {failedSection === "batch" && failedRows.length > 0 && (
             <>
-              <ValidationTable issues={failedRows} pagedGroups={issueGroupsSlice} />
+              <ValidationTable
+                issues={failedRows}
+                pagedGroups={issueGroupsSlice}
+              />
               {groupedIssues.length > issuePageSize && (
                 <Pager
                   page={batchIssuePage}
                   pageCount={issuePageCount}
-                  onPrev={() => setBatchIssuePage((current) => Math.max(1, current - 1))}
-                  onNext={() => setBatchIssuePage((current) => Math.min(issuePageCount, current + 1))}
+                  onPrev={() =>
+                    setBatchIssuePage((current) => Math.max(1, current - 1))
+                  }
+                  onNext={() =>
+                    setBatchIssuePage((current) =>
+                      Math.min(issuePageCount, current + 1),
+                    )
+                  }
                 />
               )}
             </>
@@ -1383,13 +1541,20 @@ function Dashboard({
                 importedBy={batchOutcome.importedBy}
                 createdAt={batchOutcome.createdAt}
                 copyAndToast={copyAndToast}
+                onViewParcel={openParcelInputModal}
               />
-              {(batchOutcome.results.length > pageSize) && (
+              {batchOutcome.results.length > pageSize && (
                 <Pager
                   page={batchUploadPage}
                   pageCount={batchResultPageCount}
-                  onPrev={() => setBatchUploadPage((current) => Math.max(1, current - 1))}
-                  onNext={() => setBatchUploadPage((current) => Math.min(batchResultPageCount, current + 1))}
+                  onPrev={() =>
+                    setBatchUploadPage((current) => Math.max(1, current - 1))
+                  }
+                  onNext={() =>
+                    setBatchUploadPage((current) =>
+                      Math.min(batchResultPageCount, current + 1),
+                    )
+                  }
                 />
               )}
             </>
@@ -1399,7 +1564,10 @@ function Dashboard({
 
       {page === "analytics" && (
         <Card className="space-y-4">
-          <SectionTitle title="Analytics" text="Search by parcel id or batch id to trace routed records." />
+          <SectionTitle
+            title="Analytics"
+            text="Search by parcel id or batch id to trace routed records."
+          />
           <div className="mt-5 space-y-6">
             <SearchPanel
               title="Single"
@@ -1408,23 +1576,28 @@ function Dashboard({
               setValue={setParcelSearchInput}
               loading={singleSearchLoading}
               onSearch={searchSingle}
-            onClear={() => {
-              setParcelSearchInput("");
-              setSelectedParcelId("");
-              setSelectedSingleRecord(null);
-              setSelectedSingleResult(null);
-            }}
-          >
-            <RouteResultsTable
-              rows={selectedSingle ? [selectedSingle] : []}
-              batchId={selectedSingleRecord?.batchId}
-              importedBy={selectedSingleRecord?.importedBy}
-              createdAt={selectedSingleRecord?.createdAt}
-              copyAndToast={copyAndToast}
-              compact
-              emptyText={selectedParcelId ? "No parcel found" : "Search a parcel ID to populate this table"}
-            />
-          </SearchPanel>
+              onClear={() => {
+                setParcelSearchInput("");
+                setSelectedParcelId("");
+                setSelectedSingleRecord(null);
+                setSelectedSingleResult(null);
+              }}
+            >
+              <RouteResultsTable
+                rows={selectedSingle ? [selectedSingle] : []}
+                batchId={selectedSingleRecord?.batchId}
+                importedBy={selectedSingleRecord?.importedBy}
+                createdAt={selectedSingleRecord?.createdAt}
+                copyAndToast={copyAndToast}
+                onViewParcel={openParcelInputModal}
+                compact
+                emptyText={
+                  selectedParcelId
+                    ? "No parcel found"
+                    : "Search a parcel ID to populate this table"
+                }
+              />
+            </SearchPanel>
             <SearchPanel
               title="Batch"
               label="Search batch id"
@@ -1435,24 +1608,36 @@ function Dashboard({
               onClear={() => {
                 setBatchSearchInput("");
                 setSelectedBatchId("");
+                setSelectedBatchRecords([]);
                 setAnalyticsBatchPage(1);
               }}
             >
               <RouteResultsTable
-                rows={selectedBatch ? analyticsBatchSlice : []}
-                batchId={selectedBatch?.batchId}
-                importedBy={selectedBatch?.importedBy}
-                createdAt={selectedBatch?.createdAt}
+                rows={selectedBatchRecords.length ? analyticsBatchSlice : []}
+                batchId={selectedBatchRecords[0]?.batchId ?? null}
+                importedBy={selectedBatchRecords[0]?.importedBy}
+                createdAt={selectedBatchRecords[0]?.createdAt}
                 copyAndToast={copyAndToast}
+                onViewParcel={openParcelInputModal}
                 compact
-                emptyText={selectedBatchId ? "No batch found" : "Search a batch ID to populate this table"}
+                emptyText={
+                  selectedBatchId
+                    ? "No batch found"
+                    : "Search a batch ID to populate this table"
+                }
               />
-              {selectedBatch && analyticsBatchResults.length > pageSize && (
+              {selectedBatchRecords.length > 0 && analyticsBatchResults.length > pageSize && (
                 <Pager
                   page={analyticsBatchPage}
                   pageCount={analyticsBatchPageCount}
-                  onPrev={() => setAnalyticsBatchPage((current) => Math.max(1, current - 1))}
-                  onNext={() => setAnalyticsBatchPage((current) => Math.min(analyticsBatchPageCount, current + 1))}
+                  onPrev={() =>
+                    setAnalyticsBatchPage((current) => Math.max(1, current - 1))
+                  }
+                  onNext={() =>
+                    setAnalyticsBatchPage((current) =>
+                      Math.min(analyticsBatchPageCount, current + 1),
+                    )
+                  }
                 />
               )}
             </SearchPanel>
@@ -1463,7 +1648,10 @@ function Dashboard({
       {page === "rules" && (
         <Card className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <SectionTitle title="Config Manager" text="Manage approval and routing rules." />
+            <SectionTitle
+              title="Config Manager"
+              text="Manage approval and routing rules."
+            />
             <div className="flex flex-wrap gap-3">
               <Button onClick={() => openConfigModal("approval", "new")}>
                 <Plus className="h-4 w-4" />
@@ -1495,23 +1683,38 @@ function Dashboard({
 
       {page === "seed" && (
         <Card className="space-y-4">
-          <SectionTitle title="Seed Data" text="Reset demo data for operators and admins." />
+          <SectionTitle
+            title="Seed Data"
+            text="Reset demo data for operators and admins."
+          />
           <div className="mt-4 flex flex-wrap gap-3">
             {profile.role === "operator" && (
-              <Button variant="destructive" onClick={() => promptSeedConfirm("all")}>
+              <Button
+                variant="destructive"
+                onClick={() => promptSeedConfirm("all")}
+              >
                 Seed parcel and batch data
               </Button>
             )}
             {profile.role === "admin" && (
-              <Button variant="destructive" onClick={() => promptSeedConfirm("config")}>
+              <Button
+                variant="destructive"
+                onClick={() => promptSeedConfirm("config")}
+              >
                 Seed config data
               </Button>
             )}
           </div>
           {profile.role === "operator" && (
             <section className="mt-6">
-              <h3 className="text-lg font-semibold text-white">Seeded Batch Table View</h3>
-              {seedDataLoading && <p className="mt-3 text-sm text-slate-400">Loading seeded data...</p>}
+              <h3 className="text-lg font-semibold text-white">
+                Seeded Batch Table View
+              </h3>
+              {seedDataLoading && (
+                <p className="mt-3 text-sm text-slate-400">
+                  Loading seeded data...
+                </p>
+              )}
               {!seedDataLoading && (
                 <>
                   <RouteResultsTable
@@ -1520,6 +1723,7 @@ function Dashboard({
                     importedBy={seededBatch?.importedBy}
                     createdAt={seededBatch?.createdAt}
                     copyAndToast={copyAndToast}
+                    onViewParcel={openParcelInputModal}
                     compact
                     emptyText="No seeded batch data found"
                   />
@@ -1527,8 +1731,14 @@ function Dashboard({
                     <Pager
                       page={seedBatchPage}
                       pageCount={seededBatchPageCount}
-                      onPrev={() => setSeedBatchPage((current) => Math.max(1, current - 1))}
-                      onNext={() => setSeedBatchPage((current) => Math.min(seededBatchPageCount, current + 1))}
+                      onPrev={() =>
+                        setSeedBatchPage((current) => Math.max(1, current - 1))
+                      }
+                      onNext={() =>
+                        setSeedBatchPage((current) =>
+                          Math.min(seededBatchPageCount, current + 1),
+                        )
+                      }
                     />
                   )}
                 </>
@@ -1544,9 +1754,14 @@ function Dashboard({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-white">
-                  {configModal.mode === "new" ? "New" : "Update"} {configModal.section === "approval" ? "Approval" : "Routing"} Rule
+                  {configModal.mode === "new" ? "New" : "Update"}{" "}
+                  {configModal.section === "approval" ? "Approval" : "Routing"}{" "}
+                  Rule
                 </h3>
-                <p className="mt-1 text-sm text-slate-400">Supported operators: &gt;, &lt;, &gt;=, &lt;=, ==, is_true, is_false</p>
+                <p className="mt-1 text-sm text-slate-400">
+                  Supported operators: &gt;, &lt;, &gt;=, &lt;=, ==, is_true,
+                  is_false
+                </p>
               </div>
               <Button variant="ghost" onClick={closeConfigModal}>
                 <X className="h-4 w-4" />
@@ -1566,13 +1781,23 @@ function Dashboard({
               }}
               className="mt-4 max-h-72 min-h-72 w-full resize-none overflow-auto rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 font-mono text-sm text-slate-100 outline-none focus:border-emerald-400"
             />
-            {modalMessage && <p className="mt-3 text-sm text-emerald-300">{modalMessage}</p>}
+            {modalMessage && (
+              <p className="mt-3 text-sm text-emerald-300">{modalMessage}</p>
+            )}
             {configModalIssues.length > 0 && (
               <ConfigValidationTable issues={configModalIssues} />
             )}
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button variant="secondary" onClick={() => void applyConfigModal("validate")}>Validate</Button>
-              <Button onClick={() => void applyConfigModal("apply")} disabled={!configModalValidated}>
+              <Button
+                variant="secondary"
+                onClick={() => void applyConfigModal("validate")}
+              >
+                Validate
+              </Button>
+              <Button
+                onClick={() => void applyConfigModal("apply")}
+                disabled={!configModalValidated}
+              >
                 {configModal.mode === "new" ? "Add" : "Update"}
               </Button>
             </div>
@@ -1585,19 +1810,70 @@ function Dashboard({
           <div className="w-full max-w-xl rounded-3xl border border-rose-400/30 bg-slate-950 p-5 shadow-2xl shadow-rose-950/30">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.35em] text-rose-300">Confirm Reset</p>
-                <h3 className="mt-2 text-lg font-semibold text-white">{seedConfirm.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-300">{seedConfirm.message}</p>
+                <p className="text-xs uppercase tracking-[0.35em] text-rose-300">
+                  Confirm Reset
+                </p>
+                <h3 className="mt-2 text-lg font-semibold text-white">
+                  {seedConfirm.title}
+                </h3>
+                <p className="mt-3 text-sm leading-6 text-slate-300">
+                  {seedConfirm.message}
+                </p>
               </div>
-              <Button variant="ghost" onClick={() => setSeedConfirm(null)} aria-label="Close confirmation">
+              <Button
+                variant="ghost"
+                onClick={() => setSeedConfirm(null)}
+                aria-label="Close confirmation"
+              >
                 <X className="h-4 w-4" />
               </Button>
             </div>
             <div className="mt-5 flex flex-wrap justify-end gap-3">
-              <Button variant="secondary" onClick={() => setSeedConfirm(null)}>Cancel</Button>
-              <Button variant="destructive" onClick={() => void seedData(seedConfirm.action)}>
+              <Button variant="secondary" onClick={() => setSeedConfirm(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void seedData(seedConfirm.action)}
+              >
                 {seedConfirm.confirmLabel}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(parcelInputModal || parcelInputLoading) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+          <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-950 p-5 shadow-2xl">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  Parcel Input Data
+                </h3>
+                {parcelInputModal && (
+                  <p className="mt-1 text-sm text-slate-400">
+                    Parcel ID: {parcelInputModal.parcelId}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                onClick={closeParcelInputModal}
+                aria-label="Close parcel input modal"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900 p-4">
+              {parcelInputLoading && (
+                <p className="text-sm text-slate-300">Loading parcel input...</p>
+              )}
+              {!parcelInputLoading && parcelInputModal && (
+                <pre className="max-h-[24rem] overflow-auto whitespace-pre-wrap break-words font-mono text-sm text-slate-100">
+                  {JSON.stringify(parcelInputModal.input, null, 2)}
+                </pre>
+              )}
             </div>
           </div>
         </div>
@@ -1606,17 +1882,17 @@ function Dashboard({
   );
 }
 
-function DashboardNav({
-  profile,
-}: {
-  profile: UserProfile;
-}) {
+function DashboardNav({ profile }: { profile: UserProfile }) {
   return (
     <section className="rounded-[1.75rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-5 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.2)] backdrop-blur-xl">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">Dashboard</p>
-          <h1 className="mt-1 text-2xl font-semibold text-white">Welcome back, {profile.username}</h1>
+          <p className="text-xs uppercase tracking-[0.35em] text-emerald-300">
+            Dashboard
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold text-white">
+            Welcome back, {profile.username}
+          </h1>
         </div>
         <Badge tone={profile.role === "admin" ? "amber" : "sky"}>
           {profile.role}
@@ -1629,7 +1905,9 @@ function DashboardNav({
 function SectionTitle({ title, text }: { title: string; text: string }) {
   return (
     <div>
-      <h2 className="text-[1.7rem] font-semibold tracking-tight text-white">{title}</h2>
+      <h2 className="text-[1.7rem] font-semibold tracking-tight text-white">
+        {title}
+      </h2>
       <p className="mt-1.5 text-sm leading-6 text-slate-300">{text}</p>
     </div>
   );
@@ -1653,6 +1931,7 @@ function RouteResultsTable({
   importedBy,
   createdAt,
   copyAndToast,
+  onViewParcel,
   compact = false,
   emptyText = "No records",
 }: {
@@ -1661,6 +1940,7 @@ function RouteResultsTable({
   importedBy?: string;
   createdAt?: string;
   copyAndToast: (text: string) => Promise<void>;
+  onViewParcel?: (parcelId: string) => void | Promise<void>;
   compact?: boolean;
   emptyText?: string;
 }) {
@@ -1675,6 +1955,7 @@ function RouteResultsTable({
             <th className="px-4 py-3">To Be Routed</th>
             <th className="px-4 py-3">Routed To</th>
             <th className="px-4 py-3">Approvals</th>
+            <th className="px-4 py-3">View</th>
             <th className="px-4 py-3">Imported By</th>
             <th className="px-4 py-3">Time</th>
           </tr>
@@ -1682,21 +1963,55 @@ function RouteResultsTable({
         <tbody>
           {rows.length === 0 && (
             <tr className="border-t border-white/5">
-              <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
+              <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
                 {emptyText}
               </td>
             </tr>
           )}
           {rows.map((row) => (
-            <tr key={`${row.parcelId}-${row.route}-${compact ? "compact" : "full"}`} className="border-t border-white/5">
-              <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
-              <td className="px-4 py-3">{batchId ? <CopyButton value={batchId} onCopy={copyAndToast} /> : <NaBadge />}</td>
-              <td className="px-4 py-3"><CopyButton value={row.parcelId} onCopy={copyAndToast} /></td>
+            <tr
+              key={`${row.parcelId}-${row.route}-${compact ? "compact" : "full"}`}
+              className="border-t border-white/5"
+            >
+              <td className="px-4 py-3">
+                <StatusBadge status={row.status} />
+              </td>
+              <td className="px-4 py-3">
+                {batchId ? (
+                  <CopyButton value={batchId} onCopy={copyAndToast} />
+                ) : (
+                  <NaBadge />
+                )}
+              </td>
+              <td className="px-4 py-3">
+                <CopyButton value={row.parcelId} onCopy={copyAndToast} />
+              </td>
               <td className="px-4 py-3">{renderRouteValue(row.toBeRouted)}</td>
               <td className="px-4 py-3">{renderRouteValue(row.routedTo)}</td>
-              <td className="px-4 py-3">{row.approvals.length ? row.approvals.map((approval) => <Badge key={approval} tone="amber">{approval}</Badge>) : <NaBadge />}</td>
+              <td className="px-4 py-3">
+                {row.approvals.length ? (
+                  row.approvals.map((approval) => (
+                    <Badge key={approval} tone="amber">
+                      {approval}
+                    </Badge>
+                  ))
+                ) : (
+                  <NaBadge />
+                )}
+              </td>
+              <td className="px-4 py-3">
+                <Button
+                  variant="ghost"
+                  onClick={() => void onViewParcel?.(row.parcelId)}
+                  aria-label={`View input for ${row.parcelId}`}
+                >
+                  <FileSearch className="h-4 w-4 text-emerald-300" />
+                </Button>
+              </td>
               <td className="px-4 py-3">{importedBy || <NaBadge />}</td>
-              <td className="px-4 py-3 text-slate-300">{formatTime(createdAt)}</td>
+              <td className="px-4 py-3 text-slate-300">
+                {formatTime(createdAt)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -1730,28 +2045,47 @@ function ValidationTable({
         <tbody>
           {issues.length === 0 && (
             <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-slate-400">No validation issues</td>
+              <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
+                No validation issues
+              </td>
             </tr>
           )}
           {pagedGroups.map((group, groupIndex) => {
             const groupTone = groupIndex % 2 === 0 ? "amber" : "emerald";
-            const rowClass = groupTone === "amber" ? "bg-amber-400/10" : "bg-emerald-400/10";
+            const rowClass =
+              groupTone === "amber" ? "bg-amber-400/10" : "bg-emerald-400/10";
             return group.issues.map((issue, issueIndex) => (
-              <tr key={`${group.rowNo}-${issue.field}-${issue.reason}-${issueIndex}`} className={`border-t border-white/5 ${rowClass}`}>
+              <tr
+                key={`${group.rowNo}-${issue.field}-${issue.reason}-${issueIndex}`}
+                className={`border-t border-white/5 ${rowClass}`}
+              >
                 {issueIndex === 0 && (
-                  <td rowSpan={group.issues.length} className="px-4 py-3 align-top">
-                    <Badge tone={groupTone}>{groupBadgeLabel} {group.rowNo}</Badge>
+                  <td
+                    rowSpan={group.issues.length}
+                    className="px-4 py-3 align-top"
+                  >
+                    <Badge tone={groupTone}>
+                      {groupBadgeLabel} {group.rowNo}
+                    </Badge>
                   </td>
                 )}
                 <td className="px-4 py-3 align-top">
                   <Badge tone={groupTone}>{cleanIssueField(issue.field)}</Badge>
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  <span className="block max-w-[34rem] whitespace-normal break-words leading-6">{issue.reason}</span>
+                  <span className="block max-w-[34rem] whitespace-normal break-words leading-6">
+                    {issue.reason}
+                  </span>
                 </td>
                 {issueIndex === 0 && (
-                  <td rowSpan={group.issues.length} className="px-4 py-3 align-top">
-                    <Badge tone={groupTone}>{group.issues.length} {group.issues.length === 1 ? "issue" : "issues"}</Badge>
+                  <td
+                    rowSpan={group.issues.length}
+                    className="px-4 py-3 align-top"
+                  >
+                    <Badge tone={groupTone}>
+                      {group.issues.length}{" "}
+                      {group.issues.length === 1 ? "issue" : "issues"}
+                    </Badge>
                   </td>
                 )}
               </tr>
@@ -1776,16 +2110,23 @@ function ConfigValidationTable({ issues }: { issues: ValidationIssue[] }) {
         <tbody>
           {issues.length === 0 && (
             <tr>
-              <td colSpan={2} className="px-4 py-6 text-center text-slate-400">No validation issues</td>
+              <td colSpan={2} className="px-4 py-6 text-center text-slate-400">
+                No validation issues
+              </td>
             </tr>
           )}
           {issues.map((issue, index) => (
-            <tr key={`${issue.field}-${issue.reason}-${index}`} className="border-t border-white/5">
+            <tr
+              key={`${issue.field}-${issue.reason}-${index}`}
+              className="border-t border-white/5"
+            >
               <td className="px-4 py-3 align-top">
                 <Badge tone="amber">{formatConfigIssueField(issue)}</Badge>
               </td>
               <td className="px-4 py-3 text-slate-200">
-                <span className="block whitespace-normal break-words leading-6">{issue.reason}</span>
+                <span className="block whitespace-normal break-words leading-6">
+                  {issue.reason}
+                </span>
               </td>
             </tr>
           ))}
@@ -1816,7 +2157,9 @@ function SearchPanel({
 }) {
   return (
     <section className="rounded-[1.5rem] border border-white/8 bg-slate-950/35 p-4">
-      <h3 className="mb-3 text-base font-semibold text-white sm:text-lg">{title}</h3>
+      <h3 className="mb-3 text-base font-semibold text-white sm:text-lg">
+        {title}
+      </h3>
       <div className="flex flex-wrap gap-2">
         <input
           value={value}
@@ -1824,7 +2167,12 @@ function SearchPanel({
           placeholder={label}
           className="min-w-0 flex-1 rounded-[1.15rem] border border-white/10 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-emerald-400"
         />
-        <Button variant="secondary" onClick={onSearch} disabled={loading} aria-label="Search">
+        <Button
+          variant="secondary"
+          onClick={onSearch}
+          disabled={loading}
+          aria-label="Search"
+        >
           <Search className="h-4 w-4 text-emerald-300" />
         </Button>
         <Button variant="secondary" onClick={onClear} aria-label="Clear">
@@ -1851,7 +2199,9 @@ function ConfigTable({
     <section className="mt-7">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-lg font-semibold text-white">{title}</h3>
-        <span className="text-sm text-slate-400">{rules.length === 1 ? "1 rule" : `${rules.length} rules`}</span>
+        <span className="text-sm text-slate-400">
+          {rules.length === 1 ? "1 rule" : `${rules.length} rules`}
+        </span>
       </div>
       <div className="overflow-x-auto rounded-[1.35rem] border border-white/10 bg-slate-950/35">
         <table className="w-full text-left text-sm">
@@ -1859,7 +2209,9 @@ function ConfigTable({
             <tr>
               {section === "approval" && <th className="px-4 py-3">S.No</th>}
               {section === "route" && <th className="px-4 py-3">Priority</th>}
-              <th className="px-4 py-3">{section === "approval" ? "Approval" : "Department"}</th>
+              <th className="px-4 py-3">
+                {section === "approval" ? "Approval" : "Department"}
+              </th>
               <th className="px-4 py-3">Condition</th>
               <th className="px-4 py-3">Created By</th>
               <th className="px-4 py-3">Last Modified By</th>
@@ -1869,20 +2221,48 @@ function ConfigTable({
           </thead>
           <tbody>
             {rules.map((rule, index) => (
-              <tr key={`${rule.type}-${index}`} className="border-t border-white/5">
-                {section === "approval" && <td className="px-4 py-3 text-slate-300">{index + 1}</td>}
+              <tr
+                key={`${rule.type}-${index}`}
+                className="border-t border-white/5"
+              >
+                {section === "approval" && (
+                  <td className="px-4 py-3 text-slate-300">{index + 1}</td>
+                )}
                 {section === "route" && (
-                  <td className="px-4 py-3">{rule.type === "route" && rule.priority === Number.MAX_SAFE_INTEGER ? "∞" : rule.type === "route" ? rule.priority : <NaBadge />}</td>
+                  <td className="px-4 py-3">
+                    {rule.type === "route" &&
+                    rule.priority === Number.MAX_SAFE_INTEGER ? (
+                      "∞"
+                    ) : rule.type === "route" ? (
+                      rule.priority
+                    ) : (
+                      <NaBadge />
+                    )}
+                  </td>
                 )}
                 <td className="px-4 py-3">
-                  {rule.type === "approval" ? <Badge tone="amber">{rule.action.approval}</Badge> : <Badge tone="emerald">{rule.action.department}</Badge>}
+                  {rule.type === "approval" ? (
+                    <Badge tone="amber">{rule.action.approval}</Badge>
+                  ) : (
+                    <Badge tone="emerald">{rule.action.department}</Badge>
+                  )}
                 </td>
-                <td className="px-4 py-3"><ConditionView condition={rule.when} /></td>
-                <td className="px-4 py-3">{rule.createdBy ?? <NaBadge />}</td>
-                <td className="px-4 py-3">{rule.lastModifiedBy ?? <NaBadge />}</td>
-                <td className="px-4 py-3 text-slate-300">{formatTime(rule.lastModifiedAt ?? rule.createdAt)}</td>
                 <td className="px-4 py-3">
-                  <Button variant="ghost" onClick={() => onEdit(index)} aria-label="Edit rule">
+                  <ConditionView condition={rule.when} />
+                </td>
+                <td className="px-4 py-3">{rule.createdBy ?? <NaBadge />}</td>
+                <td className="px-4 py-3">
+                  {rule.lastModifiedBy ?? <NaBadge />}
+                </td>
+                <td className="px-4 py-3 text-slate-300">
+                  {formatTime(rule.lastModifiedAt ?? rule.createdAt)}
+                </td>
+                <td className="px-4 py-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => onEdit(index)}
+                    aria-label="Edit rule"
+                  >
                     <Pencil className="h-4 w-4" />
                   </Button>
                 </td>
@@ -1890,7 +2270,12 @@ function ConfigTable({
             ))}
             {rules.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">No rules</td>
+                <td
+                  colSpan={7}
+                  className="px-4 py-6 text-center text-slate-400"
+                >
+                  No rules
+                </td>
               </tr>
             )}
           </tbody>
@@ -1903,10 +2288,16 @@ function ConfigTable({
 function ConditionView({ condition }: { condition: Condition }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="rounded-full bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-200">{condition.field}</span>
-      <span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-200">{condition.operator}</span>
+      <span className="rounded-full bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-200">
+        {condition.field}
+      </span>
+      <span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-200">
+        {condition.operator}
+      </span>
       {"value" in condition && condition.value !== undefined && (
-        <span className="rounded-full bg-fuchsia-400/10 px-3 py-1 text-xs font-medium text-fuchsia-200">{String(condition.value)}</span>
+        <span className="rounded-full bg-fuchsia-400/10 px-3 py-1 text-xs font-medium text-fuchsia-200">
+          {String(condition.value)}
+        </span>
       )}
     </span>
   );
@@ -1925,15 +2316,22 @@ function Pager({
 }) {
   return (
     <div className="mt-4 flex items-center justify-end gap-3 text-sm text-slate-300">
-      <span>Page {page} of {pageCount}</span>
-      <Button variant="secondary" onClick={onPrev} disabled={page <= 1}>Prev</Button>
-      <Button variant="secondary" onClick={onNext} disabled={page >= pageCount}>Next</Button>
+      <span>
+        Page {page} of {pageCount}
+      </span>
+      <Button variant="secondary" onClick={onPrev} disabled={page <= 1}>
+        Prev
+      </Button>
+      <Button variant="secondary" onClick={onNext} disabled={page >= pageCount}>
+        Next
+      </Button>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status?: RouteStatus }) {
-  if (status === "approval pending") return <Badge tone="amber">approval pending</Badge>;
+  if (status === "approval pending")
+    return <Badge tone="amber">approval pending</Badge>;
   if (status === "defaulted") return <Badge tone="sky">defaulted</Badge>;
   if (status === "errored") return <Badge tone="rose">errored</Badge>;
   return <Badge tone="emerald">processed</Badge>;
@@ -1952,11 +2350,21 @@ function Badge({
     sky: "bg-sky-400/15 text-sky-200",
     rose: "bg-rose-400/15 text-rose-200",
   }[tone];
-  return <span className={`mr-1 inline-flex rounded-full px-3 py-1 text-xs font-medium ${className}`}>{children}</span>;
+  return (
+    <span
+      className={`mr-1 inline-flex rounded-full px-3 py-1 text-xs font-medium ${className}`}
+    >
+      {children}
+    </span>
+  );
 }
 
 function NaBadge() {
-  return <span className="inline-flex rounded-full bg-slate-500/20 px-3 py-1 text-xs font-medium text-slate-200">n/a</span>;
+  return (
+    <span className="inline-flex rounded-full bg-slate-500/20 px-3 py-1 text-xs font-medium text-slate-200">
+      n/a
+    </span>
+  );
 }
 
 function CopyButton({
@@ -1989,7 +2397,10 @@ function groupIssues(issues: ValidationIssue[]) {
     const rowNo = issue.rowNo || 1;
     groups.set(rowNo, [...(groups.get(rowNo) ?? []), issue]);
   }
-  return [...groups.entries()].map(([rowNo, groupIssues]) => ({ rowNo, issues: groupIssues }));
+  return [...groups.entries()].map(([rowNo, groupIssues]) => ({
+    rowNo,
+    issues: groupIssues,
+  }));
 }
 
 function cleanIssueField(field: string) {
@@ -1997,7 +2408,9 @@ function cleanIssueField(field: string) {
 }
 
 function detectLikelyJsonField(source: string) {
-  const singleQuotedValueMatch = [...source.matchAll(/"([^"]+)"\s*:\s*'/g)].at(-1);
+  const singleQuotedValueMatch = [...source.matchAll(/"([^"]+)"\s*:\s*'/g)].at(
+    -1,
+  );
   if (singleQuotedValueMatch?.[1]) return singleQuotedValueMatch[1];
 
   const trailingKeyMatch = [...source.matchAll(/"([^"]+)"\s*:\s*$/gm)].at(-1);
@@ -2019,7 +2432,9 @@ function formatSingleJsonParseReason(source: string, error: unknown) {
     return "The single parcel input must be a valid JSON object wrapped in curly braces.";
   }
 
-  return error instanceof Error ? "The single parcel input is not valid JSON." : "Invalid input.";
+  return error instanceof Error
+    ? "The single parcel input is not valid JSON."
+    : "Invalid input.";
 }
 
 function formatConfigIssueField(issue: ValidationIssue) {
@@ -2033,7 +2448,11 @@ function formatConfigIssueField(issue: ValidationIssue) {
     if (/^Approval\s+.+\s+is already present\.$/.test(issue.reason)) {
       return "action.approval";
     }
-    if (/^This editor accepts only\s+(approval|route)\s+rules\.$/.test(issue.reason)) {
+    if (
+      /^This editor accepts only\s+(approval|route)\s+rules\.$/.test(
+        issue.reason,
+      )
+    ) {
       return "type";
     }
   }
@@ -2042,7 +2461,13 @@ function formatConfigIssueField(issue: ValidationIssue) {
 }
 
 function stripMetadata(rule: ConfigRule): ConfigRule {
-  const { createdBy, createdAt, lastModifiedBy, lastModifiedAt, ...businessRule } = rule;
+  const {
+    createdBy,
+    createdAt,
+    lastModifiedBy,
+    lastModifiedAt,
+    ...businessRule
+  } = rule;
   void createdBy;
   void createdAt;
   void lastModifiedBy;
@@ -2096,7 +2521,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <SiteHeader
-        profile={profile ? { name: profile.username, role: profile.role } : null}
+        profile={
+          profile ? { name: profile.username, role: profile.role } : null
+        }
         onHome={() => setView("landing")}
         onLogin={() => setView("login")}
         onDocs={() => setView("docs")}

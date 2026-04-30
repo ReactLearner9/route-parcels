@@ -7,7 +7,6 @@ import {
   getCurrentRoutingConfig,
   getRoutingConfigDb,
 } from '../config/store.js';
-import { getParcelDb, makeAuditId } from '../config/parcel-store.js';
 import type { ValidationIssueRow } from './parcel-service.js';
 
 type MulterFile = Express.Multer.File;
@@ -237,24 +236,10 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
     if (sectionConfig.rules.length === 0) {
       const approvalDb = await getApprovalConfigDb();
       const routingDb = await getRoutingConfigDb();
-      const parcelDb = await getParcelDb();
       const emptyConfig: RoutingConfig = { rules: [] };
       const checksum = checksumConfig(emptyConfig);
-      const timestamp = new Date().toISOString();
       approvalDb.data.currentConfig = emptyConfig;
       await Promise.all([approvalDb.write(), routingDb.write()]);
-
-      parcelDb.data.audits.push({
-        id: makeAuditId(),
-        batchId: file.originalname,
-        source: 'config',
-        createdAt: timestamp,
-        actor,
-        step: 'config_applied',
-        message: `Config file ${file.originalname} applied`,
-        details: { checksum }
-      });
-      await parcelDb.write();
 
       return {
         checksum,
@@ -265,7 +250,6 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
   const normalized = validateConfig(sectionConfig);
   const approvalDb = await getApprovalConfigDb();
   const routingDb = await getRoutingConfigDb();
-  const parcelDb = await getParcelDb();
   const timestamp = new Date().toISOString();
   const previousRules = section === 'route'
     ? (routingDb.data.currentConfig?.rules ?? [])
@@ -289,18 +273,6 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
     routingDb.data.currentConfig = storedConfig;
   }
   await Promise.all([approvalDb.write(), routingDb.write()]);
-
-  parcelDb.data.audits.push({
-    id: makeAuditId(),
-    batchId: file.originalname,
-    source: 'config',
-    createdAt: timestamp,
-    actor,
-    step: 'config_applied',
-    message: `Config file ${file.originalname} applied`,
-    details: { checksum }
-  });
-  await parcelDb.write();
 
   return {
     checksum,

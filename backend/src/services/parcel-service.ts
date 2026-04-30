@@ -1,7 +1,7 @@
 import type { RoutingConfig, RoutingResult } from '../core/config-types.js';
 import { batchParcelsSchema, parcelSchema, type BatchParcelsInput, type ParcelInput } from '../core/parcel-types.js';
 import { processParcel } from '../core/parcel-processor.js';
-import { getParcelDb, makeAuditId, makeBatchId, makeParcelId, type StoredParcelRecord } from '../config/parcel-store.js';
+import { getParcelDb, makeBatchId, makeParcelId, type ParcelRecord } from '../config/parcel-store.js';
 import { validateParcelAgainstRules } from '../core/parcel-validation.js';
 import { logger } from '../utils/logger.js';
 import { ZodError } from 'zod';
@@ -193,44 +193,22 @@ export async function routeSingleParcel(payload: unknown, config: RoutingConfig,
   const createdAt = new Date().toISOString();
   const actor = normalizeActor(importedBy);
   const db = await getParcelDb();
-  const auditBase = {
-    batchId: makeBatchId(),
-    source: 'single' as const,
-    createdAt,
-    actor
-  };
 
   try {
     const parcel = validateSingleParcel(payload);
     const normalizedParcel = { ...parcel, id: parcel.id ?? makeParcelId() };
-    db.data.audits.push({
-      id: makeAuditId(),
-      ...auditBase,
-      step: 'validated',
-      message: `Single parcel ${normalizedParcel.id} validated`,
-      parcelIds: [normalizedParcel.id]
-    });
 
     const result = processParcel(normalizedParcel, config);
 
-    const record: StoredParcelRecord = {
-      source: 'single',
+    const record: ParcelRecord = {
+      batchId: null,
       createdAt,
       importedBy: actor,
       input: normalizedParcel,
-      results: result
+      result
     };
 
-    db.data.singles.push(record);
-    db.data.audits.push({
-      id: makeAuditId(),
-      ...auditBase,
-      step: 'routed',
-      message: `Single parcel ${normalizedParcel.id} routed to ${result.route}`,
-      parcelIds: [normalizedParcel.id],
-      route: result.route,
-      approvalCount: result.approvals.length
-    });
+    db.data.records.push(record);
 
     await db.write();
 
@@ -258,47 +236,14 @@ export async function routeBatchFromFile(file: MulterFile, config: RoutingConfig
   const normalizedParcels = parsed.parcels.map((parcel) => ({ ...parcel, id: parcel.id ?? makeParcelId() }));
   const results = normalizedParcels.map((parcel) => processParcel(parcel, config));
   const db = await getParcelDb();
-
-  const record: StoredParcelRecord = {
+  const records: ParcelRecord[] = normalizedParcels.map((parcel, index) => ({
     batchId,
-    source: 'batch',
     createdAt,
     importedBy: actor,
-    input: normalizedParcels,
-    results
-  };
-
-  db.data.batches.push(record);
-  db.data.audits.push({
-    id: makeAuditId(),
-    batchId,
-    source: 'batch',
-    createdAt: new Date().toISOString(),
-    actor,
-    step: 'uploaded',
-    message: `Batch file ${file.originalname} uploaded with ${normalizedParcels.length} parcels`,
-    parcelIds: normalizedParcels.map((parcel) => parcel.id)
-  });
-  db.data.audits.push({
-    id: makeAuditId(),
-    batchId,
-    source: 'batch',
-    createdAt: new Date().toISOString(),
-    actor,
-    step: 'validated',
-    message: `Batch file ${file.originalname} validated`,
-    parcelIds: normalizedParcels.map((parcel) => parcel.id)
-  });
-  db.data.audits.push({
-    id: makeAuditId(),
-    batchId,
-    source: 'batch',
-    createdAt: new Date().toISOString(),
-    actor,
-    step: 'routed',
-    message: `Batch file ${file.originalname} routed`,
-    parcelIds: normalizedParcels.map((parcel) => parcel.id)
-  });
+    input: parcel,
+    result: results[index] as RoutingResult
+  }));
+  db.data.records.push(...records);
   await db.write();
 
   logger.info(

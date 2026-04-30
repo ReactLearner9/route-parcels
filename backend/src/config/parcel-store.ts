@@ -5,39 +5,16 @@ import { JSONFile } from 'lowdb/node';
 import type { ParcelInput } from '../core/parcel-types.js';
 import type { RoutingResult } from '../core/config-types.js';
 
-export type StoredParcelRecord = {
-  batchId?: string;
-  source: 'single' | 'batch';
+export type ParcelRecord = {
+  batchId: string | null;
   createdAt: string;
   importedBy: string;
-  input: ParcelInput | ParcelInput[];
-  results: RoutingResult | RoutingResult[];
-};
-
-export type ParcelAuditEvent = {
-  id: string;
-  batchId: string;
-  source: 'single' | 'batch' | 'config';
-  step:
-    | 'validated'
-    | 'routed'
-    | 'routing_failed'
-    | 'validation_failed'
-    | 'uploaded'
-    | 'config_applied';
-  createdAt: string;
-  actor?: string;
-  message: string;
-  parcelIds?: string[];
-  route?: string;
-  approvalCount?: number;
-  details?: Record<string, unknown>;
+  input: ParcelInput;
+  result: RoutingResult;
 };
 
 export type ParcelDatabase = {
-  singles: StoredParcelRecord[];
-  batches: StoredParcelRecord[];
-  audits: ParcelAuditEvent[];
+  records: ParcelRecord[];
 };
 
 const dbFile = resolve(process.cwd(), 'data', 'parcel-db.json');
@@ -51,16 +28,56 @@ export async function getParcelDb() {
 
   const adapter = new JSONFile<ParcelDatabase>(dbFile);
   const db = new Low<ParcelDatabase>(adapter, {
-    singles: [],
-    batches: [],
-    audits: []
+    records: []
   });
 
   await db.read();
+  // Backward-compatible one-time migration for older DB shape.
+  if (db.data && !Array.isArray(db.data.records)) {
+    const legacy = db.data as unknown as {
+      singles?: Array<{
+        createdAt: string;
+        importedBy: string;
+        input: ParcelInput;
+        results: RoutingResult;
+      }>;
+      batches?: Array<{
+        batchId?: string;
+        createdAt: string;
+        importedBy: string;
+        input: ParcelInput[];
+        results: RoutingResult[];
+      }>;
+    };
+    const migratedRecords: ParcelRecord[] = [];
+    for (const single of legacy.singles ?? []) {
+      migratedRecords.push({
+        batchId: null,
+        createdAt: single.createdAt,
+        importedBy: single.importedBy,
+        input: single.input,
+        result: single.results
+      });
+    }
+    for (const batch of legacy.batches ?? []) {
+      const inputs = Array.isArray(batch.input) ? batch.input : [];
+      const results = Array.isArray(batch.results) ? batch.results : [];
+      for (let index = 0; index < Math.min(inputs.length, results.length); index += 1) {
+        migratedRecords.push({
+          batchId: batch.batchId ?? null,
+          createdAt: batch.createdAt,
+          importedBy: batch.importedBy,
+          input: inputs[index] as ParcelInput,
+          result: results[index] as RoutingResult
+        });
+      }
+    }
+    db.data = { records: migratedRecords };
+    await db.write();
+  }
+
   db.data ??= {
-    singles: [],
-    batches: [],
-    audits: []
+    records: []
   };
 
   return db;
@@ -68,10 +85,6 @@ export async function getParcelDb() {
 
 export function makeBatchId() {
   return `${makeFourDigitId()}B`;
-}
-
-export function makeAuditId() {
-  return `audit-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
 export function makeParcelId() {
@@ -82,49 +95,42 @@ function makeFourDigitId() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
-export async function getParcelHistory() {
+export async function listParcelRecords(filters?: {
+  parcelId?: string;
+  batchId?: string;
+  importedBy?: string;
+}) {
   const db = await getParcelDb();
+  const parcelId = filters?.parcelId?.trim().toLowerCase();
+  const batchId = filters?.batchId?.trim().toLowerCase();
+  const importedBy = filters?.importedBy?.trim().toLowerCase();
 
-  return {
-    singles: db.data.singles,
-    batches: db.data.batches,
-    audits: db.data.audits
-  };
-}
-
-export async function traceParcel(identifier: string) {
-  const db = await getParcelDb();
-  const lower = identifier.toLowerCase();
-  const singleRecords = db.data.singles;
-  const batchRecords = db.data.batches;
-
-  const single = singleRecords.find(
-    (record) => {
-      const input = record.input as ParcelInput;
-      const result = record.results as RoutingResult;
-
-      return (
-        record.batchId?.toLowerCase() === lower ||
-        input.id?.toLowerCase() === lower ||
-        result.parcelId.toLowerCase() === lower
-      );
+  return db.data.records.filter((record) => {
+    if (parcelId) {
+      const inputId = record.input.id?.toLowerCase();
+      const resultId = record.result.parcelId.toLowerCase();
+      if (inputId !== parcelId && resultId !== parcelId) return false;
     }
-  );
-
-  const batch = batchRecords.find((record) =>
-      record.batchId?.toLowerCase() === lower ||
-    (Array.isArray(record.input) && record.input.some((parcel) => parcel.id?.toLowerCase() === lower)) ||
-    (Array.isArray(record.results) && record.results.some((result) => result.parcelId.toLowerCase() === lower))
-  );
-
-  const audits = db.data.audits.filter((audit) => {
-    return audit.batchId.toLowerCase() === lower || audit.parcelIds?.some((parcelId) => parcelId.toLowerCase() === lower);
+    if (batchId) {
+      if ((record.batchId ?? '').toLowerCase() !== batchId) return false;
+    }
+    if (importedBy) {
+      if (record.importedBy.toLowerCase() !== importedBy) return false;
+    }
+    return true;
   });
 
+}
+
+export async function getParcelCounts() {
+  const db = await getParcelDb();
+  const batchCount = new Set(
+    db.data.records
+      .map((record) => record.batchId)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+  ).size;
   return {
-    single: single ?? null,
-    batch: batch ?? null,
-    batchId: batch?.batchId ?? '',
-    audits
+    parcelCount: db.data.records.length,
+    batchCount
   };
 }

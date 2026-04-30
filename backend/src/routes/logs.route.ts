@@ -8,7 +8,7 @@ const logEventSchema = z.object({
   screen: z.string().min(1),
   functionality: z.string().min(1),
   feature: z.enum(['single-import', 'batch-import', 'analytics', 'config', 'seed']),
-  phase: z.enum(['started', 'ended']),
+  phase: z.enum(['started', 'ended']).optional(),
   status: z.enum(['passed', 'failed', 'success', 'not_found', 'found']).optional(),
   timestamp: z.string().datetime().optional(),
   durationMs: z.number().nonnegative().optional(),

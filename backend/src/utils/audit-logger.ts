@@ -1,9 +1,8 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, stat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { logger } from './logger.js';
 
 export type LogFeature = 'single-import' | 'batch-import' | 'analytics' | 'config' | 'seed';
-export type LogPhase = 'started' | 'ended';
 
 export type AuditEvent = {
   user: string;
@@ -11,7 +10,6 @@ export type AuditEvent = {
   screen: string;
   functionality: string;
   feature: LogFeature;
-  phase: LogPhase;
   status?: 'passed' | 'failed' | 'success' | 'not_found' | 'found';
   timestamp?: string;
   durationMs?: number;
@@ -30,8 +28,24 @@ function getLogFilePath(feature: LogFeature, now = new Date()) {
   const baseDir = resolve(process.cwd(), 'data', 'logs', sanitizeFilePart(feature));
   return {
     dir: baseDir,
-    file: resolve(baseDir, `${dateStamp(now)}.json`)
+    file: resolve(baseDir, `${dateStamp(now)}.csv`)
   };
+}
+
+const csvHeader = 'timestamp,sessionId,user,screen,functionality,status,durationMs,details\n';
+
+function csvValue(value: unknown) {
+  const text = value == null ? '' : String(value);
+  const escaped = text.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
+async function ensureCsvHeader(file: string) {
+  try {
+    await stat(file);
+  } catch {
+    await writeFile(file, csvHeader, 'utf8');
+  }
 }
 
 export async function logAuditEvent(event: AuditEvent) {
@@ -39,36 +53,41 @@ export async function logAuditEvent(event: AuditEvent) {
   const payload = {
     timestamp,
     sessionId: event.sessionId,
+    user: event.user,
     screen: event.screen,
     functionality: event.functionality,
-    phase: event.phase,
     status: event.status,
     durationMs: event.durationMs,
     details: event.details
   };
 
-  const phaseColor = event.phase === 'started' ? '\x1b[33mstarted\x1b[0m' : '\x1b[32mended\x1b[0m';
   const countValue = typeof event.details?.count === 'number' ? event.details.count : undefined;
   const failedCount = typeof event.details?.failedCount === 'number' ? event.details.failedCount : undefined;
   const passedCount = typeof event.details?.passedCount === 'number' ? event.details.passedCount : undefined;
+  const durationText = typeof event.durationMs === 'number' ? ` \x1b[35mduration=${event.durationMs}ms\x1b[0m` : '';
   const countText = countValue === undefined
     ? ''
     : ` \x1b[36mcount=${countValue}\x1b[0m${failedCount !== undefined ? ` \x1b[31mfailed=${failedCount}\x1b[0m` : ''}${passedCount !== undefined ? ` \x1b[32mpassed=${passedCount}\x1b[0m` : ''}`;
 
-  logger.info(payload, `${phaseColor} ${event.screen}.${event.functionality}${countText}`);
+  logger.info(payload, `event ${event.screen}.${event.functionality}${durationText}${countText}`);
+
+  if (event.feature === 'analytics' || event.feature === 'seed') {
+    return;
+  }
 
   const { dir, file } = getLogFilePath(event.feature, new Date(timestamp));
   await mkdir(dir, { recursive: true });
+  await ensureCsvHeader(file);
 
-  let existing: unknown = [];
-  try {
-    const text = await readFile(file, 'utf8');
-    existing = text.trim() ? JSON.parse(text) : [];
-  } catch {
-    existing = [];
-  }
-
-  const list = Array.isArray(existing) ? existing : [];
-  list.push(payload);
-  await writeFile(file, `${JSON.stringify(list, null, 2)}\n`, 'utf8');
+  const line = [
+    csvValue(timestamp),
+    csvValue(event.sessionId),
+    csvValue(event.user),
+    csvValue(event.screen),
+    csvValue(event.functionality),
+    csvValue(event.status ?? ''),
+    csvValue(event.durationMs ?? ''),
+    csvValue(event.details ? JSON.stringify(event.details) : '')
+  ].join(',') + '\n';
+  await appendFile(file, line, 'utf8');
 }

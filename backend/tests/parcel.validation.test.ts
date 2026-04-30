@@ -19,6 +19,11 @@ const rules: RoutingConfig['rules'] = [
     priority: 2,
     when: { field: 'weight', operator: '<=', value: 10 },
     action: { department: 'REGULAR' }
+  },
+  {
+    type: 'approval',
+    when: { field: 'destination.country', operator: '==', value: 'DE' },
+    action: { approval: 'EU_CHECK' }
   }
 ];
 
@@ -69,5 +74,26 @@ describe('validateParcelAgainstRules', () => {
     );
 
     expect(issues).toHaveLength(0);
+  });
+
+  it('reports mismatched optional field types based on equality rule value', () => {
+    const issues = validateParcelAgainstRules(
+      {
+        id: 'P4',
+        weight: 2,
+        value: 200,
+        destination: { country: 49 }
+      } as unknown as import('../src/core/config-types.js').Parcel,
+      rules
+    );
+
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'destination.country',
+          reason: expect.stringContaining('must be string')
+        })
+      ])
+    );
   });
 });

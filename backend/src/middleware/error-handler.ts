@@ -2,15 +2,37 @@ import type { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { logger } from '../utils/logger.js';
 
-export const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
-  logger.error({ error }, 'request failed');
+export const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
+  logger.error(
+    {
+      error,
+      method: request.method,
+      path: request.originalUrl,
+      ip: request.ip
+    },
+    'request failed'
+  );
+
+  let status = 500;
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const multerCode = typeof error === 'object' && error && 'code' in error ? String((error as { code: unknown }).code) : '';
+
+  if (multerCode === 'LIMIT_FILE_SIZE') {
+    status = 413;
+    response.status(status).json({
+      error: 'Payload Too Large',
+      message: 'Uploaded file exceeds the size limit.'
+    });
+    return;
+  }
 
   if (
     error instanceof ZodError ||
     error instanceof SyntaxError ||
-    (error instanceof Error && /must contain valid json/i.test(error.message))
+    /must contain valid json|batch file must be valid json|only json uploads are allowed/i.test(errorMessage)
   ) {
-    response.status(400).json({
+    status = 400;
+    response.status(status).json({
       error: 'Bad Request',
       message: error instanceof ZodError ? error.issues : error.message
     });
@@ -18,14 +40,15 @@ export const errorHandler: ErrorRequestHandler = (error, _request, response, _ne
   }
 
   if (error instanceof Error && /validated draft/i.test(error.message)) {
-    response.status(409).json({
+    status = 409;
+    response.status(status).json({
       error: 'Conflict',
       message: error.message
     });
     return;
   }
 
-  response.status(500).json({
+  response.status(status).json({
     error: 'Internal Server Error',
     message: error instanceof Error ? error.message : 'Unexpected error'
   });

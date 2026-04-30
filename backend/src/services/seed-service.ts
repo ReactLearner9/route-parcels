@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getAuthDb, hashPassword } from '../config/auth-store.js';
 import { getApprovalConfigDb, getRoutingConfigDb } from '../config/store.js';
-import { getParcelDb, makeAuditId, makeBatchId, makeParcelId } from '../config/parcel-store.js';
+import { getParcelDb, makeBatchId, makeParcelId } from '../config/parcel-store.js';
 import { processParcel } from '../core/parcel-processor.js';
 import type { RoutingConfig } from '../core/config-types.js';
 
@@ -11,13 +11,10 @@ const dataDir = resolve(process.cwd(), 'data');
 
 const seedConfig: RoutingConfig = {
   rules: [
-    { type: 'approval', when: { field: 'destination.country', operator: '==', value: 'DE' }, action: { approval: 'EU_CHECK' } },
     { type: 'approval', when: { field: 'value', operator: '>', value: 1000 }, action: { approval: 'INSURANCE' } },
-    { type: 'route', priority: 1, when: { field: 'fragile', operator: 'is_true' }, action: { department: 'SPECIAL_HANDLING' } },
-    { type: 'route', priority: 2, when: { field: 'delivery.signatureRequired', operator: 'is_false' }, action: { department: 'NO_SIGNATURE_NEEDED' } },
-    { type: 'route', priority: 3, when: { field: 'weight', operator: '<=', value: 1 }, action: { department: 'MAIL' } },
-    { type: 'route', priority: 4, when: { field: 'weight', operator: '<=', value: 10 }, action: { department: 'REGULAR' } },
-    { type: 'route', priority: 5, when: { field: 'weight', operator: '>', value: 10 }, action: { department: 'HEAVY' } },
+    { type: 'route', priority: 1, when: { field: 'weight', operator: '<=', value: 1 }, action: { department: 'MAIL' } },
+    { type: 'route', priority: 2, when: { field: 'weight', operator: '<=', value: 10 }, action: { department: 'REGULAR' } },
+    { type: 'route', priority: 3, when: { field: 'weight', operator: '>', value: 10 }, action: { department: 'HEAVY' } },
     { type: 'route', priority: Number.MAX_SAFE_INTEGER, when: { field: 'weight', operator: '>', value: 0 }, action: { department: 'MANUAL_REVIEW' } }
   ]
 };
@@ -65,9 +62,7 @@ async function seedConfigVersions() {
 
 async function seedParcelAndBatchData() {
   const parcelDb = await getParcelDb();
-  parcelDb.data.singles = [];
-  parcelDb.data.batches = [];
-  parcelDb.data.audits = [];
+  parcelDb.data.records = [];
 
   for (let index = 0; index < 5; index += 1) {
     const parcel = {
@@ -75,15 +70,13 @@ async function seedParcelAndBatchData() {
       weight: 1 + (index % 12),
       value: 80 + index * 40,
     };
-    const batchId = makeBatchId();
-    const results = processParcel(parcel, seedConfig);
-    parcelDb.data.singles.push({
-      batchId,
-      source: 'single',
+    const result = processParcel(parcel, seedConfig);
+    parcelDb.data.records.push({
+      batchId: null,
       createdAt: new Date().toISOString(),
       importedBy: 'system',
       input: parcel,
-      results
+      result
     });
   }
 
@@ -94,15 +87,17 @@ async function seedParcelAndBatchData() {
       weight: 1 + (index % 10),
       value: 60 + index * 15
     }));
-    const results = input.map((parcel) => processParcel(parcel, seedConfig));
-    parcelDb.data.batches.push({
-      batchId,
-      source: 'batch',
-      createdAt: new Date().toISOString(),
-      importedBy: 'system',
-      input,
-      results
-    });
+    const createdAt = new Date().toISOString();
+    for (const parcel of input) {
+      const result = processParcel(parcel, seedConfig);
+      parcelDb.data.records.push({
+        batchId,
+        createdAt,
+        importedBy: 'system',
+        input: parcel,
+        result
+      });
+    }
   }
 
   await parcelDb.write();

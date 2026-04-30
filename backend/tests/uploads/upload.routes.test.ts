@@ -1,4 +1,4 @@
-import { readFile, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -62,8 +62,7 @@ describe('parcel upload flow', () => {
     expect(response.body.result.route).toBe('REGULAR');
     expect(response.body.result.approvals).toEqual(['INSURANCE', 'FRAGILE_HANDLING']);
 
-    const db = JSON.parse(await readFile(parcelDbPath, 'utf8'));
-    expect(db.singles).toHaveLength(1);
+    expect(response.body.batchId).toBeUndefined();
   });
 
   it('routes a batch upload from multipart form data', async () => {
@@ -87,8 +86,8 @@ describe('parcel upload flow', () => {
     expect(response.body.results[0].route).toBe('REGULAR');
     expect(response.body.results[1].route).toBe('HEAVY');
 
-    const db = JSON.parse(await readFile(parcelDbPath, 'utf8'));
-    expect(db.batches).toHaveLength(1);
+    expect(response.body.batchId).toMatch(/^\d{4}B$/);
+    expect(response.body.results).toHaveLength(2);
   });
 
   it('rejects single parcel upload when no config has been applied', async () => {
@@ -141,7 +140,7 @@ describe('parcel upload flow', () => {
       .post('/api/upload/batch')
       .attach('batchFile', Buffer.from('not-json'), 'batch.json');
 
-    expect(response.status).toBe(500);
-    expect(response.body.error).toBe('Internal Server Error');
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Bad Request');
   });
 });
