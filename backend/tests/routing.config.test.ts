@@ -163,7 +163,7 @@ describe('config upload flow', () => {
 
     expect(applyResponse.status).toBe(200);
     expect(applyResponse.body.applied).toBe(true);
-    expect(applyResponse.body.checksum).toBeTypeOf('string');
+    expect(applyResponse.body.checksum).toBeUndefined();
 
     const routingApplyResponse = await request(app)
       .post('/api/config/routing/apply')
@@ -171,7 +171,7 @@ describe('config upload flow', () => {
 
     expect(routingApplyResponse.status).toBe(200);
     expect(routingApplyResponse.body.applied).toBe(true);
-    expect(routingApplyResponse.body.checksum).toBeTypeOf('string');
+    expect(routingApplyResponse.body.checksum).toBeUndefined();
 
     const approvalDb = JSON.parse(await readFile(approvalDbPath, 'utf8'));
     const routingDb = JSON.parse(await readFile(routingDbPath, 'utf8'));

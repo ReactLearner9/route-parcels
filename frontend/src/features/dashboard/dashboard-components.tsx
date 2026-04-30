@@ -1,9 +1,19 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Copy, Eraser, FileSearch, Pencil, Search, Trash2 } from "lucide-react";
+import {
+  Copy,
+  Eraser,
+  FileSearch,
+  Info,
+  Pencil,
+  Search,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {
   Condition,
   ConfigRule,
+  AlertRecord,
   RouteStatus,
   RoutingResult,
   UserProfile,
@@ -449,6 +459,103 @@ export function ConfigTable({
         </table>
       </div>
     </section>
+  );
+}
+
+export function AlertsTable({
+  alerts,
+  onMarkRead,
+  pendingAlertId,
+  closingAlertIds,
+}: {
+  alerts: AlertRecord[];
+  onMarkRead: (alertId: string) => void;
+  pendingAlertId?: string | null;
+  closingAlertIds?: string[];
+}) {
+  return (
+    <div className="mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/35">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-white/5 text-slate-300">
+          <tr>
+            <th className="px-4 py-3">S.No</th>
+            <th className="px-4 py-3">Alert</th>
+            <th className="px-4 py-3">Reason</th>
+            <th className="px-4 py-3">Level</th>
+            <th className="px-4 py-3">Timestamp</th>
+            <th className="px-4 py-3">Read</th>
+          </tr>
+        </thead>
+        <tbody>
+          {alerts.length === 0 && (
+            <tr className="border-t border-white/5">
+              <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                No alerts yet
+              </td>
+            </tr>
+          )}
+          {alerts.map((alert, index) => {
+            const isPending = pendingAlertId === alert.id;
+            const isClosing = closingAlertIds?.includes(alert.id) ?? false;
+            return (
+              <tr
+                key={alert.id}
+                className={`border-t border-white/5 transition-opacity duration-900 ${
+                  isClosing
+                    ? "opacity-0"
+                    : "opacity-100"
+                }`}
+              >
+                <td className="px-4 py-3 text-slate-300">{index + 1}</td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
+                      alert.level === "alert"
+                        ? "bg-amber-400/15 text-amber-200"
+                        : "bg-sky-400/15 text-sky-200"
+                    }`}
+                  >
+                    {alert.level === "alert" ? (
+                      <TriangleAlert className="h-3.5 w-3.5" />
+                    ) : (
+                      <Info className="h-3.5 w-3.5" />
+                    )}
+                    <span>{alert.name}</span>
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-200">
+                  <span className="block max-w-[34rem] whitespace-normal break-words leading-6">
+                    {alert.reason}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <Badge tone={alert.level === "alert" ? "amber" : "sky"}>
+                    {alert.level}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-slate-300">
+                  {formatTime(alert.triggeredAt)}
+                </td>
+                <td className="px-4 py-3">
+                  <label className="inline-flex items-center gap-2 text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      disabled={isPending || isClosing}
+                      onChange={() => onMarkRead(alert.id)}
+                      className="h-4 w-4 rounded border-white/20 bg-slate-900 text-emerald-400 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-xs">
+                      {isPending ? "Saving..." : "Mark Read"}
+                    </span>
+                  </label>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

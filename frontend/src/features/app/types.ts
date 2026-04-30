@@ -3,13 +3,20 @@ import type { LucideIcon } from "lucide-react";
 export type View = "landing" | "login" | "dashboard";
 export type Role = "admin" | "operator";
 export type AuthMode = "login" | "register";
-export type DashboardPage = "single" | "batch" | "analytics" | "rules" | "seed";
+export type DashboardPage =
+  | "single"
+  | "batch"
+  | "analytics"
+  | "rules"
+  | "seed"
+  | "alerts";
 export type RouteStatus = "processed" | "approval pending" | "defaulted" | "errored";
 
 export type DashboardNavItem = {
   key: DashboardPage;
   label: string;
   icon: LucideIcon;
+  badgeCount?: number;
 };
 
 export type UserProfile = { id: string; username: string; role: Role };
@@ -103,6 +110,25 @@ export type ConfigResponse = {
   currentConfig?: { rules: ConfigRule[] } | null;
 };
 
+export type AlertLevel = "alert" | "info";
+
+export type AlertRecord = {
+  id: string;
+  name: string;
+  level: AlertLevel;
+  reason: string;
+  triggeredAt: string;
+  details?: Record<string, unknown>;
+};
+
+export type AlertsResponse = {
+  alerts: AlertRecord[];
+};
+
+export type AlertUnreadCountResponse = {
+  unreadCount: number;
+};
+
 export type ConfigModalState = {
   section: "approval" | "route";
   mode: "new" | "edit";
@@ -126,7 +152,13 @@ export type UiLogEvent = {
   sessionId?: string;
   screen: string;
   functionality: string;
-  feature: "single-import" | "batch-import" | "analytics" | "config" | "seed";
+  feature:
+    | "single-import"
+    | "batch-import"
+    | "analytics"
+    | "config"
+    | "seed"
+    | "alerts";
   phase?: "started" | "ended";
   status?: "passed" | "failed" | "success" | "not_found" | "found";
   timestamp?: string;

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { configSchema, type ConfigRule, type RoutingConfig } from '../core/config-types.js';
 import { validateConfig, withFallbackRouteRule } from '../core/rule-validator.js';
 import {
@@ -9,6 +8,7 @@ import {
 } from '../config/store.js';
 import type { ValidationIssueRow } from './parcel-service.js';
 import { logAuditEvent } from '../utils/audit-logger.js';
+import { recordConfigChangeInfo } from './alert-service.js';
 
 type MulterFile = Express.Multer.File;
 
@@ -21,6 +21,10 @@ type ConfigSection = 'approval' | 'route';
 
 function normalizeActor(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : 'system';
+}
+
+function shouldCreateConfigAlert(actor: string) {
+  return actor !== 'system';
 }
 
 function explainConfigIssue(issue: { path: PropertyKey[]; message: string }): Omit<ValidationIssueRow, 'rowNo'> {
@@ -74,14 +78,24 @@ function parseSectionConfig(file: MulterFile, section: ConfigSection): RoutingCo
   return result.data;
 }
 
-export function checksumConfig(config: RoutingConfig) {
-  return createHash('sha256').update(JSON.stringify(config)).digest('hex');
-}
-
 function buildSectionConfig(config: RoutingConfig, section: ConfigSection): RoutingConfig {
   return {
     rules: config.rules.filter((rule) => rule.type === section),
   };
+}
+
+function getSectionIdentifiers(section: ConfigSection, rules: ConfigRule[]) {
+  return section === 'approval'
+    ? {
+        approvalNames: rules
+          .filter((rule): rule is Extract<ConfigRule, { type: 'approval' }> => rule.type === 'approval')
+          .map((rule) => rule.action.approval)
+      }
+    : {
+        departments: rules
+          .filter((rule): rule is Extract<ConfigRule, { type: 'route' }> => rule.type === 'route')
+          .map((rule) => rule.action.department)
+      };
 }
 
 function stripRuleMetadata(rule: ConfigRule): ConfigRule {
@@ -101,6 +115,53 @@ function ruleIdentity(rule: ConfigRule) {
 
 function ruleBusinessSignature(rule: ConfigRule) {
   return JSON.stringify(stripRuleMetadata(rule));
+}
+
+function summarizeConfigCrudChange(
+  previousRules: ConfigRule[],
+  nextRules: ConfigRule[],
+): { action: 'created' | 'updated' | 'deleted' | 'changed'; count: number } | null {
+  const previousByIdentity = new Map(
+    previousRules.map((rule) => [ruleIdentity(rule), ruleBusinessSignature(rule)]),
+  );
+  const nextByIdentity = new Map(
+    nextRules.map((rule) => [ruleIdentity(rule), ruleBusinessSignature(rule)]),
+  );
+
+  let created = 0;
+  let updated = 0;
+  let deleted = 0;
+
+  for (const [identity, signature] of nextByIdentity) {
+    const previousSignature = previousByIdentity.get(identity);
+    if (!previousSignature) {
+      created += 1;
+      continue;
+    }
+    if (previousSignature !== signature) {
+      updated += 1;
+    }
+  }
+
+  for (const identity of previousByIdentity.keys()) {
+    if (!nextByIdentity.has(identity)) {
+      deleted += 1;
+    }
+  }
+
+  if (created > 0 && updated === 0 && deleted === 0) {
+    return { action: 'created', count: created };
+  }
+  if (updated > 0 && created === 0 && deleted === 0) {
+    return { action: 'updated', count: updated };
+  }
+  if (deleted > 0 && created === 0 && updated === 0) {
+    return { action: 'deleted', count: deleted };
+  }
+
+  const changedCount = created + updated + deleted;
+  if (changedCount === 0) return null;
+  return { action: 'changed', count: changedCount };
 }
 
 function annotateRules(
@@ -233,12 +294,12 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
   const config = parseSectionConfig(file, section);
   const sectionConfig = buildSectionConfig(config, section);
   const actor = normalizeActor(modifiedBy);
-  if (section === 'approval') {
+    if (section === 'approval') {
     if (sectionConfig.rules.length === 0) {
       const approvalDb = await getApprovalConfigDb();
       const routingDb = await getRoutingConfigDb();
       const emptyConfig: RoutingConfig = { rules: [] };
-      const checksum = checksumConfig(emptyConfig);
+      const previousRules = approvalDb.data.currentConfig?.rules ?? [];
       approvalDb.data.currentConfig = emptyConfig;
       await Promise.all([approvalDb.write(), routingDb.write()]);
       await logAuditEvent({
@@ -248,11 +309,18 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
         functionality: 'rule_apply',
         feature: 'config',
         status: 'success',
-        details: { section, checksum }
+        details: {
+          section,
+          action: 'deleted',
+          ...getSectionIdentifiers(section, previousRules)
+        }
       });
+      const changeSummary = summarizeConfigCrudChange(previousRules, emptyConfig.rules);
+      if (changeSummary && changeSummary.action !== 'changed' && shouldCreateConfigAlert(actor)) {
+        await recordConfigChangeInfo({ section, actor, ...changeSummary });
+      }
 
       return {
-        checksum,
         config: emptyConfig
       };
     }
@@ -276,13 +344,13 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
     : {
         rules: annotateRules(normalized.rules, previousRules, actor, timestamp)
       };
-  const checksum = checksumConfig(storedConfig);
   if (section === 'approval') {
     approvalDb.data.currentConfig = storedConfig;
   } else {
     routingDb.data.currentConfig = storedConfig;
   }
   await Promise.all([approvalDb.write(), routingDb.write()]);
+  const changeSummary = summarizeConfigCrudChange(previousRules, storedConfig.rules);
   await logAuditEvent({
     user: actor,
     sessionId,
@@ -290,11 +358,17 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
     functionality: 'rule_apply',
     feature: 'config',
     status: 'success',
-    details: { section, checksum }
+    details: {
+      section,
+      action: changeSummary?.action ?? 'unchanged',
+      ...getSectionIdentifiers(section, storedConfig.rules)
+    }
   });
+  if (changeSummary && changeSummary.action !== 'changed' && shouldCreateConfigAlert(actor)) {
+    await recordConfigChangeInfo({ section, actor, ...changeSummary });
+  }
 
   return {
-    checksum,
     config: storedConfig
   };
 }

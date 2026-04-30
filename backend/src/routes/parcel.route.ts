@@ -2,7 +2,13 @@ import { Router } from 'express';
 import { upload } from '../middleware/upload.js';
 import { getAppliedConfig } from '../services/config-service.js';
 import { routeBatchFromFile, routeSingleParcel, validateBatchFilePayload, validateSingleParcelPayload } from '../services/parcel-service.js';
+import {
+  recordBatchImportFailure,
+  recordSingleImportFailure,
+  recordValidationFailedUpload
+} from '../services/alert-service.js';
 import type { RoutingConfig } from '../core/config-types.js';
+import { logAuditEvent } from '../utils/audit-logger.js';
 
 const fallbackConfig = {
   rules: [
@@ -16,10 +22,39 @@ const fallbackConfig = {
 
 export const parcelRouter = Router();
 
+function readSessionId(headers: Record<string, unknown>) {
+  return typeof headers['x-session-id'] === 'string' ? headers['x-session-id'] : 'backend';
+}
+
+function normalizeActor(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : 'system';
+}
+
+function countBatchParcels(file: Express.Multer.File) {
+  try {
+    const parsed = JSON.parse(file.buffer.toString('utf8')) as { parcels?: unknown[] };
+    return Array.isArray(parsed.parcels) ? parsed.parcels.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 parcelRouter.post('/validate/single', async (request, response, next) => {
   try {
     const config = await getAppliedConfig();
-    response.json(await validateSingleParcelPayload(request.body, config ?? fallbackConfig));
+    const sessionId = readSessionId(request.headers as Record<string, unknown>);
+    const actor = normalizeActor((request.body as { importedBy?: unknown } | undefined)?.importedBy);
+    const report = await validateSingleParcelPayload(request.body, config ?? fallbackConfig);
+    await logAuditEvent({
+      user: actor,
+      sessionId,
+      screen: 'Import Single',
+      functionality: 'single_validate',
+      feature: 'single-import',
+      status: report.valid ? 'passed' : 'failed',
+      details: { count: 1, failedCount: report.valid ? 0 : 1, passedCount: report.valid ? 1 : 0 }
+    });
+    response.json(report);
   } catch (error) {
     next(error);
   }
@@ -33,7 +68,24 @@ parcelRouter.post('/validate/batch', upload.single('batchFile'), async (request,
     }
 
     const config = await getAppliedConfig();
-    response.json(await validateBatchFilePayload(request.file, config ?? fallbackConfig));
+    const sessionId = readSessionId(request.headers as Record<string, unknown>);
+    const actor = normalizeActor(request.body?.importedBy);
+    const report = await validateBatchFilePayload(request.file, config ?? fallbackConfig);
+    const recordCount = countBatchParcels(request.file);
+    const failedCount = report.valid ? 0 : new Set(report.issues.map((issue) => issue.rowNo)).size;
+    await logAuditEvent({
+      user: actor,
+      sessionId,
+      screen: 'Import Batch',
+      functionality: 'batch_validate',
+      feature: 'batch-import',
+      status: report.valid ? 'passed' : 'failed',
+      details: { count: recordCount, failedCount, passedCount: Math.max(0, recordCount - failedCount) }
+    });
+    if (!report.valid) {
+      await recordValidationFailedUpload({ source: 'batch', issueCount: report.issues.length });
+    }
+    response.json(report);
   } catch (error) {
     next(error);
   }
@@ -42,7 +94,7 @@ parcelRouter.post('/validate/batch', upload.single('batchFile'), async (request,
 parcelRouter.post('/single', async (request, response, next) => {
   try {
     const config = await getAppliedConfig();
-    const sessionId = typeof request.headers['x-session-id'] === 'string' ? request.headers['x-session-id'] : 'backend';
+    const sessionId = readSessionId(request.headers as Record<string, unknown>);
 
     const { importedBy, ...parcelPayload } = request.body ?? {};
     const result = await routeSingleParcel(parcelPayload, config ?? fallbackConfig, importedBy, sessionId);
@@ -54,6 +106,9 @@ parcelRouter.post('/single', async (request, response, next) => {
       result: result.result
     });
   } catch (error) {
+    await recordSingleImportFailure({
+      reason: error instanceof Error ? error.message : 'Single import failed'
+    });
     next(error);
   }
 });
@@ -66,7 +121,7 @@ parcelRouter.post('/batch', upload.single('batchFile'), async (request, response
     }
 
     const config = await getAppliedConfig();
-    const sessionId = typeof request.headers['x-session-id'] === 'string' ? request.headers['x-session-id'] : 'backend';
+    const sessionId = readSessionId(request.headers as Record<string, unknown>);
 
     const result = await routeBatchFromFile(request.file, config ?? fallbackConfig, request.body?.importedBy, sessionId);
 
@@ -84,6 +139,10 @@ parcelRouter.post('/batch', upload.single('batchFile'), async (request, response
       results: result.results
     });
   } catch (error) {
+    await recordBatchImportFailure({
+      source: 'batch',
+      reason: error instanceof Error ? error.message : 'Batch import failed'
+    });
     next(error);
   }
 });

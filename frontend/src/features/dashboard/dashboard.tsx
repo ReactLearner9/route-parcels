@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  BellRing,
   BadgeCheck,
   CheckCircle2,
   FileText,
@@ -14,7 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import type {
+  AlertRecord,
+  AlertsResponse,
   BatchRouteOutcome,
+  AlertUnreadCountResponse,
   ConfigModalState,
   ConfigResponse,
   ConfigRule,
@@ -48,6 +52,7 @@ import {
   SectionTitle,
   TryNewButton,
   ValidationTable,
+  AlertsTable,
 } from "@/features/dashboard/dashboard-components";
 import {
   detectLikelyJsonField,
@@ -69,10 +74,12 @@ export function Dashboard({
   profile,
   page,
   onPageChange,
+  onAlertUnreadCountChange,
 }: {
   profile: UserProfile;
   page: DashboardPage;
   onPageChange: (page: DashboardPage) => void;
+  onAlertUnreadCountChange: (count: number) => void;
 }) {
   const [configState, setConfigState] = useState<ConfigResponse | null>(null);
   const [singleText, setSingleText] = useState(defaultSingle);
@@ -122,6 +129,10 @@ export function Dashboard({
   const [seedConfirm, setSeedConfirm] = useState<SeedConfirmState | null>(null);
   const [parcelInputModal, setParcelInputModal] = useState<ParcelInputModalState | null>(null);
   const [parcelInputLoading, setParcelInputLoading] = useState(false);
+  const [alerts, setAlerts] = useState<AlertRecord[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [pendingReadAlertId, setPendingReadAlertId] = useState<string | null>(null);
+  const [closingAlertIds, setClosingAlertIds] = useState<string[]>([]);
   const batchFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const visiblePages = useMemo<DashboardNavItem[]>(
@@ -131,12 +142,14 @@ export function Dashboard({
             { key: "analytics", label: "Analytics", icon: Search },
             { key: "rules", label: "Config", icon: ShieldCheck },
             { key: "seed", label: "Seed", icon: FileText },
+            { key: "alerts", label: "Alerts", icon: BellRing },
           ]
         : [
             { key: "single", label: "Single", icon: BadgeCheck },
             { key: "batch", label: "Batch", icon: FileUp },
             { key: "analytics", label: "Analytics", icon: Search },
             { key: "seed", label: "Seed", icon: FileText },
+            { key: "alerts", label: "Alerts", icon: BellRing },
           ],
     [profile.role],
   );
@@ -157,6 +170,73 @@ export function Dashboard({
   useEffect(() => {
     void refreshConfig();
   }, []);
+
+  const refreshUnreadAlertCount = async () => {
+    try {
+      const response = await api<AlertUnreadCountResponse>(
+        "/api/alerts/unread-count",
+      );
+      onAlertUnreadCountChange(response.unreadCount);
+    } catch {
+      onAlertUnreadCountChange(0);
+    }
+  };
+
+  const loadAlerts = async () => {
+    setAlertsLoading(true);
+    try {
+      const response = await api<AlertsResponse>("/api/alerts");
+      setAlerts(response.alerts);
+      onAlertUnreadCountChange(response.alerts.length);
+    } catch {
+      setAlerts([]);
+      onAlertUnreadCountChange(0);
+      toast.error("Unable to load alerts");
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const markAlertRead = async (alertId: string) => {
+    setPendingReadAlertId(alertId);
+    try {
+      const response = await api<{ alertId: string; removed: boolean }>(
+        `/api/alerts/${encodeURIComponent(alertId)}/read`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ readBy: profile.username }),
+        },
+      );
+      setClosingAlertIds((current) => [...current, response.alertId]);
+      window.setTimeout(() => {
+        setAlerts((current) =>
+          current.filter((alert) => alert.id !== response.alertId),
+        );
+        setClosingAlertIds((current) =>
+          current.filter((currentId) => currentId !== response.alertId),
+        );
+      }, 450);
+      toast.success("Alert marked as read");
+      await refreshUnreadAlertCount();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update alert");
+    } finally {
+      setPendingReadAlertId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (page !== "alerts") return;
+    void loadAlerts();
+    const intervalId = window.setInterval(() => {
+      void loadAlerts();
+    }, 60 * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [page]);
 
   const approvalRules = configState?.approvalConfig?.rules ?? [];
   const routingRules = configState?.routingConfig?.rules ?? [];
@@ -213,7 +293,7 @@ export function Dashboard({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(parsed),
+          body: JSON.stringify({ ...parsed, importedBy: profile.username }),
         },
       );
       setSingleValidated(report.valid);
@@ -328,6 +408,7 @@ export function Dashboard({
     try {
       const formData = new FormData();
       formData.append("batchFile", batchFile, batchFile.name);
+      formData.append("importedBy", profile.username);
       const report = await api<ValidationReport>("/api/upload/validate/batch", {
         method: "POST",
         body: formData,
@@ -666,12 +747,11 @@ export function Dashboard({
         type: "application/json",
       }),
     );
-    if (mode === "apply") formData.append("modifiedBy", profile.username);
+    formData.append("modifiedBy", profile.username);
     const report = await api<{
       valid?: boolean;
       issues?: ValidationIssue[];
       applied?: boolean;
-      checksum?: string;
     }>(endpoint, {
       method: "POST",
       body: formData,
@@ -1235,6 +1315,25 @@ export function Dashboard({
                 </>
               )}
             </section>
+          )}
+        </Card>
+      )}
+
+      {page === "alerts" && (
+        <Card className="space-y-4">
+          <SectionTitle
+            title="Alerts"
+            text="Review operational alerts, config change notices, and mark items as read."
+          />
+          {alertsLoading ? (
+            <p className="text-sm text-slate-400">Loading alerts...</p>
+          ) : (
+            <AlertsTable
+              alerts={alerts}
+              onMarkRead={(alertId) => void markAlertRead(alertId)}
+              pendingAlertId={pendingReadAlertId}
+              closingAlertIds={closingAlertIds}
+            />
           )}
         </Card>
       )}

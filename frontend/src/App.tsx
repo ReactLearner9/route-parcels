@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   BadgeCheck,
+  BellRing,
   FileText,
   FileUp,
   Search,
@@ -14,6 +15,7 @@ import { Dashboard } from "@/features/dashboard/dashboard";
 import { useStoredProfile } from "@/hooks/use-stored-profile";
 import { api } from "@/lib/api";
 import type {
+  AlertUnreadCountResponse,
   AuthMode,
   DashboardNavItem,
   DashboardPage,
@@ -25,6 +27,7 @@ import type {
 function getHeaderNavItems(
   view: View,
   profile: UserProfile | null,
+  alertUnreadCount: number,
 ): DashboardNavItem[] {
   if (view !== "dashboard" || !profile) return [];
 
@@ -33,12 +36,24 @@ function getHeaderNavItems(
         { key: "analytics", label: "Analytics", icon: Search },
         { key: "rules", label: "Config", icon: ShieldCheck },
         { key: "seed", label: "Seed", icon: FileText },
+        {
+          key: "alerts",
+          label: "Alerts",
+          icon: BellRing,
+          badgeCount: alertUnreadCount,
+        },
       ]
     : [
         { key: "single", label: "Single", icon: BadgeCheck },
         { key: "batch", label: "Batch", icon: FileUp },
         { key: "analytics", label: "Analytics", icon: Search },
         { key: "seed", label: "Seed", icon: FileText },
+        {
+          key: "alerts",
+          label: "Alerts",
+          icon: BellRing,
+          badgeCount: alertUnreadCount,
+        },
       ];
 }
 
@@ -48,12 +63,57 @@ export default function App() {
   const [headerDashboardPage, setHeaderDashboardPage] = useState<DashboardPage>(
     profile?.role === "admin" ? "analytics" : "single",
   );
-  const headerNavItems = getHeaderNavItems(view, profile);
+  const [alertUnreadCount, setAlertUnreadCount] = useState(0);
+  const headerNavItems = getHeaderNavItems(view, profile, alertUnreadCount);
+  const [lastAlertToastAt, setLastAlertToastAt] = useState(0);
 
   useEffect(() => {
     if (!profile) return;
     setHeaderDashboardPage(profile.role === "admin" ? "analytics" : "single");
   }, [profile?.role]);
+
+  useEffect(() => {
+    if (!profile || view !== "dashboard") {
+      setAlertUnreadCount(0);
+      setLastAlertToastAt(0);
+      return;
+    }
+
+    let active = true;
+
+    const loadUnreadAlerts = async () => {
+      try {
+        const response = await api<AlertUnreadCountResponse>(
+          "/api/alerts/unread-count",
+        );
+        if (!active) return;
+        setAlertUnreadCount(response.unreadCount);
+        const now = Date.now();
+        if (
+          response.unreadCount > 0 &&
+          now - lastAlertToastAt >= 5 * 60 * 1000
+        ) {
+          toast.warning(
+            `${response.unreadCount} alert${response.unreadCount === 1 ? "" : "s"} pending review`,
+          );
+          setLastAlertToastAt(now);
+        }
+      } catch {
+        if (!active) return;
+        setAlertUnreadCount(0);
+      }
+    };
+
+    void loadUnreadAlerts();
+    const intervalId = window.setInterval(() => {
+      void loadUnreadAlerts();
+    }, 60 * 1000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [lastAlertToastAt, profile?.id, view]);
 
   const login = async (form: LoginForm, mode: AuthMode) => {
     const user = await api<UserProfile>(`/api/auth/${mode}`, {
@@ -99,6 +159,7 @@ export default function App() {
           profile={profile}
           page={headerDashboardPage}
           onPageChange={setHeaderDashboardPage}
+          onAlertUnreadCountChange={setAlertUnreadCount}
         />
       )}
     </div>
