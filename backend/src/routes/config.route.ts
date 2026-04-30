@@ -51,7 +51,8 @@ configRouter.post('/approval/apply', upload.single('configFile'), async (request
       return;
     }
 
-    const result = await applyUploadedApprovalConfig(request.file, request.body?.modifiedBy);
+    const sessionId = typeof request.headers['x-session-id'] === 'string' ? request.headers['x-session-id'] : 'backend';
+    const result = await applyUploadedApprovalConfig(request.file, request.body?.modifiedBy, sessionId);
     response.json({
       applied: true,
       checksum: result.checksum
@@ -68,7 +69,8 @@ configRouter.post('/routing/apply', upload.single('configFile'), async (request,
       return;
     }
 
-    const result = await applyUploadedRoutingConfig(request.file, request.body?.modifiedBy);
+    const sessionId = typeof request.headers['x-session-id'] === 'string' ? request.headers['x-session-id'] : 'backend';
+    const result = await applyUploadedRoutingConfig(request.file, request.body?.modifiedBy, sessionId);
 
     response.json({
       applied: true,

@@ -57,7 +57,7 @@ describe('parcel upload flow', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.status).toBe('approval pending');
-    expect(response.body.result.parcelId).toMatch(/^\d{4}S$/);
+    expect(response.body.result.parcelId).toMatch(/^\d{6}S$/);
     expect(response.body.batchId).toBeUndefined();
     expect(response.body.result.route).toBe('REGULAR');
     expect(response.body.result.approvals).toEqual(['INSURANCE', 'FRAGILE_HANDLING']);

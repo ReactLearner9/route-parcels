@@ -23,7 +23,7 @@ describe('parcel routing core', () => {
 
     expect(result.route).toBe('REGULAR');
     expect(result.approvals).toEqual(['INSURANCE', 'FRAGILE_HANDLING']);
-    expect(result.parcelId).toMatch(/^\d{4}S$/);
+    expect(result.parcelId).toMatch(/^\d{6}S$/);
     expect(result.status).toBe('approval pending');
     expect(result.toBeRouted).toBe('REGULAR');
     expect(result.routedTo).toBe('n/a');

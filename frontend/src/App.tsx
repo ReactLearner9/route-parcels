@@ -6,6 +6,7 @@ import {
   Copy,
   Eraser,
   Eye,
+  EyeOff,
   FileSearch,
   FileText,
   FileUp,
@@ -37,7 +38,7 @@ type DashboardNavItem = {
 };
 
 type UserProfile = { id: string; username: string; role: Role };
-type LoginForm = { username: string; password: string; role: Role };
+type LoginForm = { username: string; password: string; role: Role | "" };
 
 type ValidationIssue = {
   rowNo: number;
@@ -181,7 +182,18 @@ const defaultRoutingRule = JSON.stringify(
 );
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const existingSessionId = sessionStorage.getItem("route-parcels-session-id");
+  const sessionId =
+    existingSessionId ??
+    `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  if (!existingSessionId) {
+    sessionStorage.setItem("route-parcels-session-id", sessionId);
+  }
+
+  const headers = new Headers(init?.headers ?? {});
+  headers.set("x-session-id", sessionId);
+
+  const response = await fetch(path, { ...init, headers });
   const payload = await response.json().catch(() => null);
   if (!response.ok) throw new Error(payload?.error ?? "Request failed");
   return payload as T;
@@ -236,7 +248,11 @@ function PasswordField({
         className="absolute inset-y-0 right-0 flex items-center px-4 text-slate-400 transition hover:text-white"
         aria-label={revealed ? "Hide password" : "Show password"}
       >
-        <Eye className="h-4 w-4" />
+        {revealed ? (
+          <EyeOff className="h-4 w-4" />
+        ) : (
+          <Eye className="h-4 w-4" />
+        )}
       </button>
     </div>
   );
@@ -481,10 +497,15 @@ function LoginPage({
   const [form, setForm] = useState<LoginForm>({
     username: "",
     password: "",
-    role: "admin",
+    role: "",
   });
   const [mode, setMode] = useState<AuthMode>("login");
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{
+    role?: string;
+    username?: string;
+    password?: string;
+  }>({});
 
   return (
     <main className="mx-auto grid max-w-5xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
@@ -515,6 +536,27 @@ function LoginPage({
             event.preventDefault();
             try {
               setError(null);
+              const nextFieldErrors: {
+                role?: string;
+                username?: string;
+                password?: string;
+              } = {};
+              if (mode === "register" && !form.role) {
+                nextFieldErrors.role = "Role is required";
+              }
+              if (!form.username.trim()) {
+                nextFieldErrors.username = "Username is required";
+              }
+              if (!form.password.trim()) {
+                nextFieldErrors.password = "Password is required";
+              } else if (form.password.length <= 6) {
+                nextFieldErrors.password =
+                  "Password must be more than 6 characters";
+              }
+              setFieldErrors(nextFieldErrors);
+              if (Object.keys(nextFieldErrors).length > 0) {
+                return;
+              }
               await onLogin(form, mode);
             } catch (loginError) {
               setError(
@@ -526,37 +568,61 @@ function LoginPage({
           }}
         >
           {mode === "register" && (
-            <select
-              className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
-              value={form.role}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  role: event.target.value as Role,
-                }))
-              }
-            >
-              <option value="operator">Operator</option>
-              <option value="admin">Admin</option>
-            </select>
+            <div className="relative">
+              <select
+                className="w-full appearance-none rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 pr-10 text-sm outline-none focus:border-emerald-400"
+                value={form.role}
+                onChange={(event) =>
+                  {
+                    setFieldErrors((current) => ({ ...current, role: undefined }));
+                    setForm((current) => ({
+                      ...current,
+                      role: event.target.value as Role,
+                    }));
+                  }
+                }
+              >
+                <option value="" disabled>
+                  Select role
+                </option>
+                <option value="operator">Operator</option>
+                <option value="admin">Admin</option>
+              </select>
+              <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                ▼
+              </span>
+            </div>
+          )}
+          {mode === "register" && fieldErrors.role && (
+            <p className="-mt-2 text-sm text-rose-300">{fieldErrors.role}</p>
           )}
           <input
             className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-emerald-400"
             value={form.username}
             onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                username: event.target.value,
-              }))
+              {
+                setFieldErrors((current) => ({ ...current, username: undefined }));
+                setForm((current) => ({
+                  ...current,
+                  username: event.target.value,
+                }));
+              }
             }
             placeholder="Username"
           />
+          {fieldErrors.username && (
+            <p className="-mt-2 text-sm text-rose-300">{fieldErrors.username}</p>
+          )}
           <PasswordField
             value={form.password}
-            onChange={(value) =>
-              setForm((current) => ({ ...current, password: value }))
-            }
+            onChange={(value) => {
+              setFieldErrors((current) => ({ ...current, password: undefined }));
+              setForm((current) => ({ ...current, password: value }));
+            }}
           />
+          {fieldErrors.password && (
+            <p className="-mt-2 text-sm text-rose-300">{fieldErrors.password}</p>
+          )}
           <div className="flex flex-wrap gap-3 pt-1">
             <Button type="submit">
               {mode === "login" ? "Login" : "Register"}
@@ -920,10 +986,7 @@ function Dashboard({
   };
 
   const routeBatch = async () => {
-    if (!batchFile) {
-      toast.error("Choose a batch file first");
-      return;
-    }
+    if (!batchFile) return;
 
     const startedAt = performance.now();
     await logUiEvent({
@@ -1033,7 +1096,6 @@ function Dashboard({
         details: { searchId: identifier },
       });
     } catch {
-      toast.error("Unable to load analytics");
       await logUiEvent({
         user: profile.username,
         screen: "Analytics",
@@ -1081,7 +1143,6 @@ function Dashboard({
         details: { searchId: identifier, recordCount: batchRecordCount },
       });
     } catch {
-      toast.error("Unable to load analytics");
       await logUiEvent({
         user: profile.username,
         screen: "Analytics",

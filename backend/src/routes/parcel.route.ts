@@ -42,9 +42,10 @@ parcelRouter.post('/validate/batch', upload.single('batchFile'), async (request,
 parcelRouter.post('/single', async (request, response, next) => {
   try {
     const config = await getAppliedConfig();
+    const sessionId = typeof request.headers['x-session-id'] === 'string' ? request.headers['x-session-id'] : 'backend';
 
     const { importedBy, ...parcelPayload } = request.body ?? {};
-    const result = await routeSingleParcel(parcelPayload, config ?? fallbackConfig, importedBy);
+    const result = await routeSingleParcel(parcelPayload, config ?? fallbackConfig, importedBy, sessionId);
 
     response.json({
       status: result.result.status,
@@ -65,8 +66,9 @@ parcelRouter.post('/batch', upload.single('batchFile'), async (request, response
     }
 
     const config = await getAppliedConfig();
+    const sessionId = typeof request.headers['x-session-id'] === 'string' ? request.headers['x-session-id'] : 'backend';
 
-    const result = await routeBatchFromFile(request.file, config ?? fallbackConfig, request.body?.importedBy);
+    const result = await routeBatchFromFile(request.file, config ?? fallbackConfig, request.body?.importedBy, sessionId);
 
     response.json({
       status: result.results.some((entry) => entry.status === 'errored')

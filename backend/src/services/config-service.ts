@@ -8,6 +8,7 @@ import {
   getRoutingConfigDb,
 } from '../config/store.js';
 import type { ValidationIssueRow } from './parcel-service.js';
+import { logAuditEvent } from '../utils/audit-logger.js';
 
 type MulterFile = Express.Multer.File;
 
@@ -228,7 +229,7 @@ export async function validateUploadedConfig(file: MulterFile): Promise<ConfigVa
   return validateSectionFile(file, 'route');
 }
 
-async function applySectionFile(file: MulterFile, section: ConfigSection, modifiedBy = 'system') {
+async function applySectionFile(file: MulterFile, section: ConfigSection, modifiedBy = 'system', sessionId = 'backend') {
   const config = parseSectionConfig(file, section);
   const sectionConfig = buildSectionConfig(config, section);
   const actor = normalizeActor(modifiedBy);
@@ -240,6 +241,15 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
       const checksum = checksumConfig(emptyConfig);
       approvalDb.data.currentConfig = emptyConfig;
       await Promise.all([approvalDb.write(), routingDb.write()]);
+      await logAuditEvent({
+        user: actor,
+        sessionId,
+        screen: 'Config',
+        functionality: 'rule_apply',
+        feature: 'config',
+        status: 'success',
+        details: { section, checksum }
+      });
 
       return {
         checksum,
@@ -273,6 +283,15 @@ async function applySectionFile(file: MulterFile, section: ConfigSection, modifi
     routingDb.data.currentConfig = storedConfig;
   }
   await Promise.all([approvalDb.write(), routingDb.write()]);
+  await logAuditEvent({
+    user: actor,
+    sessionId,
+    screen: 'Config',
+    functionality: 'rule_apply',
+    feature: 'config',
+    status: 'success',
+    details: { section, checksum }
+  });
 
   return {
     checksum,
@@ -288,12 +307,12 @@ export async function validateUploadedRoutingConfig(file: MulterFile) {
   return validateSectionFile(file, 'route');
 }
 
-export async function applyUploadedApprovalConfig(file: MulterFile, modifiedBy?: string) {
-  return applySectionFile(file, 'approval', modifiedBy);
+export async function applyUploadedApprovalConfig(file: MulterFile, modifiedBy?: string, sessionId?: string) {
+  return applySectionFile(file, 'approval', modifiedBy, sessionId);
 }
 
-export async function applyUploadedRoutingConfig(file: MulterFile, modifiedBy?: string) {
-  return applySectionFile(file, 'route', modifiedBy);
+export async function applyUploadedRoutingConfig(file: MulterFile, modifiedBy?: string, sessionId?: string) {
+  return applySectionFile(file, 'route', modifiedBy, sessionId);
 }
 
 export async function getConfigState() {

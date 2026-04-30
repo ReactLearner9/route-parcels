@@ -4,6 +4,7 @@ import { processParcel } from '../core/parcel-processor.js';
 import { getParcelDb, makeBatchId, makeParcelId, type ParcelRecord } from '../config/parcel-store.js';
 import { validateParcelAgainstRules } from '../core/parcel-validation.js';
 import { logger } from '../utils/logger.js';
+import { logAuditEvent } from '../utils/audit-logger.js';
 import { ZodError } from 'zod';
 
 type MulterFile = Express.Multer.File;
@@ -189,7 +190,7 @@ export async function validateBatchFilePayload(file: MulterFile, config: Routing
   return { valid: issues.length === 0, issues };
 }
 
-export async function routeSingleParcel(payload: unknown, config: RoutingConfig, importedBy = 'system') {
+export async function routeSingleParcel(payload: unknown, config: RoutingConfig, importedBy = 'system', sessionId = 'backend') {
   const createdAt = new Date().toISOString();
   const actor = normalizeActor(importedBy);
   const db = await getParcelDb();
@@ -211,6 +212,15 @@ export async function routeSingleParcel(payload: unknown, config: RoutingConfig,
     db.data.records.push(record);
 
     await db.write();
+    await logAuditEvent({
+      user: actor,
+      sessionId,
+      screen: 'Import Single',
+      functionality: 'single_import',
+      feature: 'single-import',
+      status: 'success',
+      details: { generatedParcelId: result.parcelId, route: result.route }
+    });
 
     logger.info({ parcelId: normalizedParcel.id, route: result.route }, 'single parcel routed');
 
@@ -220,7 +230,7 @@ export async function routeSingleParcel(payload: unknown, config: RoutingConfig,
   }
 }
 
-export async function routeBatchFromFile(file: MulterFile, config: RoutingConfig, importedBy = 'system') {
+export async function routeBatchFromFile(file: MulterFile, config: RoutingConfig, importedBy = 'system', sessionId = 'backend') {
   let payload: unknown;
   const actor = normalizeActor(importedBy);
 
@@ -245,6 +255,15 @@ export async function routeBatchFromFile(file: MulterFile, config: RoutingConfig
   }));
   db.data.records.push(...records);
   await db.write();
+  await logAuditEvent({
+    user: actor,
+    sessionId,
+    screen: 'Import Batch',
+    functionality: 'batch_import',
+    feature: 'batch-import',
+    status: 'success',
+    details: { batchId, count: results.length }
+  });
 
   logger.info(
     { batchId, count: normalizedParcels.length, parcelIds: normalizedParcels.map((parcel) => parcel.id) },

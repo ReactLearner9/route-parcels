@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { logger } from '../utils/logger.js';
+import { logExceptionToFile } from '../utils/exception-logger.js';
 
 export const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
   logger.error(
@@ -19,6 +20,7 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
 
   if (multerCode === 'LIMIT_FILE_SIZE') {
     status = 413;
+    void logExceptionToFile(request, error);
     response.status(status).json({
       error: 'Payload Too Large',
       message: 'Uploaded file exceeds the size limit.'
@@ -32,6 +34,7 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
     /must contain valid json|batch file must be valid json|only json uploads are allowed/i.test(errorMessage)
   ) {
     status = 400;
+    void logExceptionToFile(request, error);
     response.status(status).json({
       error: 'Bad Request',
       message: error instanceof ZodError ? error.issues : error.message
@@ -41,6 +44,7 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
 
   if (error instanceof Error && /validated draft/i.test(error.message)) {
     status = 409;
+    void logExceptionToFile(request, error);
     response.status(status).json({
       error: 'Conflict',
       message: error.message
@@ -48,6 +52,7 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
     return;
   }
 
+  void logExceptionToFile(request, error);
   response.status(status).json({
     error: 'Internal Server Error',
     message: error instanceof Error ? error.message : 'Unexpected error'
