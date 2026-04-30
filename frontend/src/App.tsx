@@ -14,6 +14,7 @@ import {
   Plus,
   Search,
   ShieldCheck,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -1221,13 +1222,16 @@ function Dashboard({
     section: "approval" | "route",
     mode: "validate" | "apply",
     rules: ConfigRule[],
+    actionType?: "add" | "edit" | "delete",
   ) => {
     const startedAt = performance.now();
     const configAction =
       mode === "apply"
-        ? configModal?.mode === "edit"
-          ? "rule_modify"
-          : "rule_add"
+        ? actionType === "delete"
+          ? "rule_delete"
+          : actionType === "edit"
+            ? "rule_modify"
+            : "rule_add"
         : "rule_validate";
     await logUiEvent({
       user: profile.username,
@@ -1343,10 +1347,16 @@ function Dashboard({
           configModal.section,
           "validate",
           nextRules,
+          configModal.mode === "edit" ? "edit" : "add",
         );
         if (!valid) return;
       }
-      await submitConfig(configModal.section, mode, nextRules);
+      await submitConfig(
+        configModal.section,
+        mode,
+        nextRules,
+        configModal.mode === "edit" ? "edit" : "add",
+      );
     } catch (error) {
       const issues = [
         {
@@ -1361,6 +1371,20 @@ function Dashboard({
       setModalMessage(null);
       setConfigModalValidated(false);
     }
+  };
+
+  const deleteConfigRule = async (
+    section: "approval" | "route",
+    index: number,
+  ) => {
+    const currentRules = section === "approval" ? approvalRules : routingRules;
+    const nextRules = currentRules
+      .map((rule) => stripMetadata(rule))
+      .filter((_, ruleIndex) => ruleIndex !== index);
+    const valid = await submitConfig(section, "validate", nextRules, "delete");
+    if (!valid) return;
+    await submitConfig(section, "apply", nextRules, "delete");
+    toast.success("Rule deleted");
   };
 
   const seedData = async (action: "all" | "config") => {
@@ -1716,12 +1740,14 @@ function Dashboard({
             rules={approvalRules}
             section="approval"
             onEdit={(index) => openConfigModal("approval", "edit", index)}
+            onDelete={(index) => void deleteConfigRule("approval", index)}
           />
           <ConfigTable
             title="Routing Table View"
             rules={routingRules}
             section="route"
             onEdit={(index) => openConfigModal("route", "edit", index)}
+            onDelete={(index) => void deleteConfigRule("route", index)}
           />
           {failedSection === "config" && failedRows.length > 0 && (
             <ConfigValidationTable issues={failedRows} />
@@ -2003,9 +2029,9 @@ function RouteResultsTable({
             <th className="px-4 py-3">To Be Routed</th>
             <th className="px-4 py-3">Routed To</th>
             <th className="px-4 py-3">Approvals</th>
-            <th className="px-4 py-3">View</th>
             <th className="px-4 py-3">Imported By</th>
             <th className="px-4 py-3">Time</th>
+            <th className="px-4 py-3">Parcel Input</th>
           </tr>
         </thead>
         <tbody>
@@ -2038,14 +2064,20 @@ function RouteResultsTable({
               <td className="px-4 py-3">{renderRouteValue(row.routedTo)}</td>
               <td className="px-4 py-3">
                 {row.approvals.length ? (
-                  row.approvals.map((approval) => (
-                    <Badge key={approval} tone="amber">
-                      {approval}
-                    </Badge>
-                  ))
+                  <ul className="space-y-2">
+                    {row.approvals.map((approval) => (
+                      <li key={approval}>
+                        <Badge tone="amber">{approval}</Badge>
+                      </li>
+                    ))}
+                  </ul>
                 ) : (
                   <NaBadge />
                 )}
+              </td>
+              <td className="px-4 py-3">{importedBy || <NaBadge />}</td>
+              <td className="px-4 py-3 text-slate-300">
+                {formatTime(createdAt)}
               </td>
               <td className="px-4 py-3">
                 <Button
@@ -2055,10 +2087,6 @@ function RouteResultsTable({
                 >
                   <FileSearch className="h-4 w-4 text-emerald-300" />
                 </Button>
-              </td>
-              <td className="px-4 py-3">{importedBy || <NaBadge />}</td>
-              <td className="px-4 py-3 text-slate-300">
-                {formatTime(createdAt)}
               </td>
             </tr>
           ))}
@@ -2237,11 +2265,13 @@ function ConfigTable({
   rules,
   section,
   onEdit,
+  onDelete,
 }: {
   title: string;
   rules: ConfigRule[];
   section: "approval" | "route";
   onEdit: (index: number) => void;
+  onDelete: (index: number) => void;
 }) {
   return (
     <section className="mt-7">
@@ -2265,6 +2295,7 @@ function ConfigTable({
               <th className="px-4 py-3">Last Modified By</th>
               <th className="px-4 py-3">Time</th>
               <th className="px-4 py-3">Edit</th>
+              <th className="px-4 py-3">Delete</th>
             </tr>
           </thead>
           <tbody>
@@ -2314,12 +2345,27 @@ function ConfigTable({
                     <Pencil className="h-4 w-4" />
                   </Button>
                 </td>
+                <td className="px-4 py-3">
+                  {rule.type === "route" &&
+                  rule.priority === Number.MAX_SAFE_INTEGER &&
+                  rule.action.department === "MANUAL_REVIEW" ? (
+                    <NaBadge />
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      onClick={() => void onDelete(index)}
+                      aria-label="Delete rule"
+                    >
+                      <Trash2 className="h-4 w-4 text-rose-300" />
+                    </Button>
+                  )}
+                </td>
               </tr>
             ))}
             {rules.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-4 py-6 text-center text-slate-400"
                 >
                   No rules
@@ -2400,7 +2446,7 @@ function Badge({
   }[tone];
   return (
     <span
-      className={`mr-1 inline-flex rounded-full px-3 py-1 text-xs font-medium ${className}`}
+      className={`mr-1 inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${className}`}
     >
       {children}
     </span>

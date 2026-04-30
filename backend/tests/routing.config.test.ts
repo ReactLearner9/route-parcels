@@ -71,6 +71,66 @@ describe('parcel routing core', () => {
 
     expect(result.approvals).toContain('CUSTOMS_REVIEW');
   });
+
+  it('accumulates multiple approvals for the same parcel', () => {
+    const config = {
+      ...sampleConfig,
+      rules: [
+        {
+          type: 'approval',
+          when: { field: 'destination.country', operator: '==', value: 'DE' },
+          action: { approval: 'EU_CHECK' }
+        },
+        ...sampleConfig.rules
+      ]
+    };
+
+    const result = processParcel(
+      {
+        id: 'P4',
+        weight: 2,
+        value: 2000,
+        isFragile: true,
+        destination: { country: 'DE' }
+      },
+      config
+    );
+
+    expect(result.approvals).toEqual([
+      'EU_CHECK',
+      'INSURANCE',
+      'FRAGILE_HANDLING'
+    ]);
+    expect(result.status).toBe('approval pending');
+  });
+
+  it('supports routing using a nested field condition', () => {
+    const config = {
+      ...sampleConfig,
+      rules: [
+        {
+          type: 'route',
+          priority: 2,
+          when: { field: 'destination.country', operator: '==', value: 'DE' },
+          action: { department: 'EU_DESK' }
+        },
+        ...sampleConfig.rules
+      ]
+    };
+
+    const result = processParcel(
+      {
+        id: 'P5',
+        weight: 2,
+        value: 200,
+        destination: { country: 'DE' }
+      },
+      config
+    );
+
+    expect(result.route).toBe('EU_DESK');
+    expect(result.status).toBe('processed');
+  });
 });
 
 describe('config upload flow', () => {
@@ -104,6 +164,14 @@ describe('config upload flow', () => {
     expect(applyResponse.status).toBe(200);
     expect(applyResponse.body.applied).toBe(true);
     expect(applyResponse.body.checksum).toBeTypeOf('string');
+
+    const routingApplyResponse = await request(app)
+      .post('/api/config/routing/apply')
+      .attach('configFile', Buffer.from(await routingFile.arrayBuffer()), 'routing.json');
+
+    expect(routingApplyResponse.status).toBe(200);
+    expect(routingApplyResponse.body.applied).toBe(true);
+    expect(routingApplyResponse.body.checksum).toBeTypeOf('string');
 
     const approvalDb = JSON.parse(await readFile(approvalDbPath, 'utf8'));
     const routingDb = JSON.parse(await readFile(routingDbPath, 'utf8'));

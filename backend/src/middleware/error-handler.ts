@@ -23,7 +23,7 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
     void logExceptionToFile(request, error);
     response.status(status).json({
       error: 'Payload Too Large',
-      message: 'Uploaded file exceeds the size limit.'
+      message: 'Uploaded file exceeds the 5 MB size limit.'
     });
     return;
   }

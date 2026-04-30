@@ -3,7 +3,7 @@ import multer from 'multer';
 export const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 1024 * 1024
+    fileSize: 5 * 1024 * 1024
   },
   fileFilter: (_request, file, callback) => {
     const allowed = new Set(['application/json', 'text/json']);
