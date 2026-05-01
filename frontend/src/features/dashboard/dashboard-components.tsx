@@ -394,7 +394,7 @@ export function ConfigTable({
                   <td className="px-4 py-3">
                     {rule.type === "route" &&
                     rule.priority === Number.MAX_SAFE_INTEGER ? (
-                      "inf"
+                      "∞"
                     ) : rule.type === "route" ? (
                       rule.priority
                     ) : (
@@ -545,9 +545,7 @@ export function AlertsTable({
                       onChange={() => onMarkRead(alert.id)}
                       className="h-4 w-4 rounded border-white/20 bg-slate-900 text-emerald-400 disabled:cursor-not-allowed"
                     />
-                    <span className="text-xs">
-                      {isPending ? "Saving..." : "Mark Read"}
-                    </span>
+                    <span className="text-xs">Mark Read</span>
                   </label>
                 </td>
               </tr>

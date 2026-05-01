@@ -836,7 +836,13 @@ export function Dashboard({
       const nextRules =
         configModal.mode === "edit" && typeof configModal.index === "number"
           ? businessRules.map((rule, index) =>
-              index === configModal.index ? parsed : rule,
+              index === configModal.index
+                ? {
+                    ...parsed,
+                    createdBy: currentRules[index]?.createdBy,
+                    createdAt: currentRules[index]?.createdAt,
+                  }
+                : rule,
             )
           : [...businessRules, parsed];
       if (mode === "apply") {

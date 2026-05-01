@@ -174,8 +174,8 @@ function annotateRules(
 
   return nextRules.map((rule) => {
     const previousRule = previousByIdentity.get(ruleIdentity(rule));
-    const createdBy = previousRule?.createdBy ?? actor;
-    const createdAt = previousRule?.createdAt ?? timestamp;
+    const createdBy = previousRule?.createdBy ?? rule.createdBy ?? actor;
+    const createdAt = previousRule?.createdAt ?? rule.createdAt ?? timestamp;
     const unchanged = previousRule && ruleBusinessSignature(previousRule) === ruleBusinessSignature(rule);
 
     return {

@@ -73,18 +73,3 @@ authRouter.post("/login", async (request, response, next) => {
   }
 });
 
-authRouter.get("/users", async (_request, response, next) => {
-  try {
-    const db = await getAuthDb();
-    response.json(
-      db.data.users.map((user) => ({
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        createdAt: user.createdAt,
-      })),
-    );
-  } catch (error) {
-    next(error);
-  }
-});
