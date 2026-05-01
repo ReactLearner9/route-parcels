@@ -6,7 +6,6 @@ import {
   findUserByUsername,
   getAuthDb,
   hashPassword,
-  seedUsers,
 } from "../config/auth-store.js";
 
 const credentialsSchema = z.object({
@@ -17,8 +16,6 @@ const credentialsSchema = z.object({
 
 export const authRouter = Router();
 authRouter.use(authRateLimit);
-
-await seedUsers();
 
 authRouter.post("/register", async (request, response, next) => {
   try {

@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { z } from 'zod';
@@ -39,31 +39,6 @@ export async function getAuthDb() {
   await db.read();
   db.data ??= { users: [] };
   return db;
-}
-
-export async function seedUsers() {
-  const db = await getAuthDb();
-
-  if (db.data.users.length > 0) return;
-
-  db.data.users.push(
-    {
-      id: randomUUID(),
-      username: 'admin',
-      passwordHash: hashPassword('admin123'),
-      role: 'admin',
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: randomUUID(),
-      username: 'operator',
-      passwordHash: hashPassword('operator123'),
-      role: 'operator',
-      createdAt: new Date().toISOString()
-    }
-  );
-
-  await db.write();
 }
 
 export async function findUserByUsername(username: string) {

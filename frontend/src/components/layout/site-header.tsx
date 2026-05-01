@@ -1,6 +1,6 @@
 import { APP_NAME } from '@/lib/app-meta';
 import { Button } from '@/components/ui/button';
-import { Home, LogOut, UserCircle2, type LucideIcon } from 'lucide-react';
+import { LogOut, UserCircle2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 type HeaderNavItem = {
@@ -53,8 +53,12 @@ export function SiteHeader({
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-3">
           <button className="flex items-center gap-3 text-left" onClick={onHome} type="button">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300 shadow-lg shadow-emerald-950/20">
-              <Home className="h-5 w-5" />
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 shadow-lg shadow-emerald-950/20">
+              <img
+                src="/brand/route-parcels-mark.svg"
+                alt="Route Parcels logo"
+                className="h-7 w-7"
+              />
             </div>
             <div>
               <p className="text-[0.72rem] font-bold uppercase tracking-[0.34em] text-emerald-300">{APP_NAME}</p>

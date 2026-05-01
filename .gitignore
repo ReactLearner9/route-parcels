@@ -13,3 +13,4 @@ frontend/docs/*
 backend/data/*.json
 backend/data/**/*.csv
 !backend/data/.gitkeep
+docs/presentation-outline.md
